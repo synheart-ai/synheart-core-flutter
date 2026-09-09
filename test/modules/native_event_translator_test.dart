@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:synheart_behavior/synheart_behavior.dart' as sb;
-import 'package:synheart_core/src/models/behavior_event_input.dart';
 import 'package:synheart_core/src/modules/behavior/native_event_translator.dart';
 
 /// Guards the native → engine translation.
