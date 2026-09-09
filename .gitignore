@@ -86,3 +86,8 @@ env/*.local.json
 # placeholder template is checked in.
 example/env/*.json
 !example/env/defines.example.json
+
+# Agent instruction files. Local working guidance, not part of the published
+# SDK — kept out of the repo so it can be edited freely without a review cycle.
+CLAUDE.md
+AGENTS.md

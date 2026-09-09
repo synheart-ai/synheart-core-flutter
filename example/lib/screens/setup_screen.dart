@@ -125,6 +125,74 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
 
+          // §2 — the four declarations that change engine output. On this
+          // screen rather than the Host tab because they are config, read
+          // once at `synheart_core_new`: changing one after initialize()
+          // does nothing until the SDK is torn down and rebuilt.
+          SectionCard(
+            title: 'Host declarations',
+            subtitle:
+                'Four declarations that change what the engine outputs. All '
+                'opt-in rather than derived from platform, because each one '
+                'changes the output of a host already in the field — the '
+                'default, declaring nothing, reproduces pre-0.16.0 behaviour '
+                'exactly.',
+            trailing: StatusPill(
+              c.host.declareHostProfile ? 'declared' : 'undeclared',
+              tone: c.host.declareHostProfile
+                  ? PillTone.good
+                  : PillTone.neutral,
+            ),
+            children: [
+              ConsentToggle(
+                title: 'Declare host profile',
+                description:
+                    'Sends sensing, device_class, mask_profile and '
+                    'cfi_structural_components: 4. '
+                    'Declaring device_class folds into the SRM config_hash '
+                    'and INVALIDATES every persisted baseline — the person '
+                    're-warms 30 observations across 3 distinct days. Declare '
+                    'it once at first launch and keep it stable; changing it '
+                    'mid-life is a baseline reset, not a config tweak.',
+                value: c.host.declareHostProfile,
+                onChanged: c.isInitialized ? null : c.setDeclareHostProfile,
+              ),
+              ConsentToggle(
+                title: 'Claim continuous sensing',
+                description:
+                    '"auto" resolves iOS to episodic, which withholds '
+                    'Capacity and Mental Fatigue from every frame with reason '
+                    'episodic_sensing. Continuous is a claim only the host can '
+                    'make, and only truthfully — it needs a live BLE '
+                    'peripheral holding the process alive. This example has '
+                    'none, so this is a way to see the two heads come back, '
+                    'not a way to earn them.',
+                value: c.host.claimContinuousSensing,
+                onChanged: c.isInitialized || !c.host.declareHostProfile
+                    ? null
+                    : c.setClaimContinuousSensing,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                c.isInitialized
+                    ? 'Locked while initialized — the config JSON is read '
+                          'once at synheart_core_new. Shut down on this tab '
+                          'to change them.'
+                    : 'mask_profile: mobile admits the hesitation bit in the '
+                          'Communication and WritingEditing context rows, '
+                          'moving Focus and Cognitive Load. '
+                          'cfi_structural_components: 4 LOWERS conf_CFI for '
+                          'identical evidence by widening the coverage '
+                          'denominator — that direction surprises people, and '
+                          'it is correct.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+
           SectionCard(
             title: 'Device attestation',
             subtitle: SynheartController.attestationConfigured

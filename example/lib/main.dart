@@ -3,19 +3,27 @@ import 'package:provider/provider.dart';
 
 import 'screens/consent_screen.dart';
 import 'screens/diagnostics_screen.dart';
+import 'screens/host_screen.dart';
 import 'screens/session_screen.dart';
 import 'screens/setup_screen.dart';
 import 'sdk/synheart_controller.dart';
 
 /// Synheart Core SDK — reference example.
 ///
-/// Four tabs, one per step of the SDK lifecycle, in the order a host app
+/// Five tabs, one per step of the SDK lifecycle, in the order a host app
 /// performs them:
 ///
 ///   Setup       → build a config and initialize
 ///   Consent     → the runtime editable-form flow
 ///   Session     → start collection, watch HSI arrive
+///   Host        → what the host has to keep DOING once a session is live:
+///                 the tick loop, rest declaration, snapshots, daily loop
 ///   Diagnostics → native runtime health
+///
+/// The Host tab is the one that is easy to skip and shouldn't be. Everything
+/// before it is configuration; a host that stops there gets a session that
+/// emits no windows from interaction, scores every break as engaged, and
+/// re-warms its baselines from cold on every launch.
 ///
 /// All SDK calls live in [SynheartController]. Screens only read state from it
 /// and call its methods, so the integration is legible in one file.
@@ -67,6 +75,7 @@ class _HomeShellState extends State<_HomeShell> {
     SetupScreen(),
     ConsentScreen(),
     SessionScreen(),
+    HostScreen(),
     DiagnosticsScreen(),
   ];
 
@@ -137,6 +146,14 @@ class _HomeShellState extends State<_HomeShell> {
             ),
             selectedIcon: const Icon(Icons.play_circle),
             label: 'Session',
+          ),
+          NavigationDestination(
+            icon: Icon(
+              Icons.settings_input_antenna_outlined,
+              color: ready ? null : Theme.of(context).disabledColor,
+            ),
+            selectedIcon: const Icon(Icons.settings_input_antenna),
+            label: 'Host',
           ),
           NavigationDestination(
             icon: Icon(

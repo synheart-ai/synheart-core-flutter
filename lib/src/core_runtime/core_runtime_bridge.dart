@@ -996,6 +996,216 @@ class CoreRuntimeBridge {
   void pushBehavior(int tsMs, int eventType, double value) =>
       _ffi.pushBehavior(_handle, tsMs, eventType, value);
 
+  // ── Mobile host surface ─────────────────────────────────────────────
+  //
+  // Each of these degrades to a no-op when the vendored runtime predates the
+  // symbol (see the optional lookups in `ffi_bindings.dart`). The return
+  // values distinguish the two cases where it matters: `pushBehaviorEventJson`
+  // and `rollDay` return `null` for "not available in this runtime" and an int
+  // status otherwise, so a caller can tell an unavailable ABI from a rejected
+  // event.
+
+  /// Whether the loaded runtime can take rich behavior events at all.
+  ///
+  /// Probe this once and pick a path, rather than inferring it from a `null`
+  /// return after the fact. A host that aggregates keystrokes into windowed
+  /// `Typing` summaries needs to know *before* it starts buffering whether the
+  /// summary will land: discovering it ten seconds later leaves a window's
+  /// worth of keystrokes with no path to the engine, and re-sending them
+  /// through the legacy call would double-count everything already summarized.
+  bool get supportsRichBehaviorEvents => _ffi.pushBehaviorEvent != null;
+
+  /// Which of the mobile-host ABI calls the *loaded* runtime actually exports.
+  ///
+  /// The vendored `.so` / xcframework a host ships is a pinned artifact, not
+  /// this source tree, so a binding being present here says nothing about
+  /// whether the call does anything on the device in front of you. Every entry
+  /// below degrades to a no-op (or a `null` return) when false.
+  ///
+  /// Keys are the Dart-facing names, not the C symbols, so a host can drive a
+  /// capability table off this map without hard-coding `synheart_core_…`
+  /// strings. Reading it resolves each optional lookup, so it doubles as the
+  /// audit `runtimeDiagnostics(probeAll: true)` performs.
+  Map<String, bool> get mobileHostAbiSupport => <String, bool>{
+    'pushBehaviorEvent': _ffi.pushBehaviorEvent != null,
+    'pushContextEvent': _ffi.pushContextEvent != null,
+    'pushSpeed': _ffi.pushSpeed != null,
+    'setAccelPlacement': _ffi.setAccelPlacement != null,
+    'declareRestWindow': _ffi.declareRestWindow != null,
+    'tickAll': _ffi.tickAll != null,
+    'flushPending': _ffi.flushPending != null,
+    'rollDay': _ffi.rollDay != null,
+    'exportSessionState': _ffi.exportSessionState != null,
+    'loadSessionState': _ffi.loadSessionState != null,
+    'configId': _ffi.configId != null,
+    'lastHsv': _ffi.lastHsv != null,
+    'attachStrainScoreJson': _ffi.attachStrainScoreJson != null,
+  };
+
+  /// Push one rich behavior event as JSON. Returns the runtime's status
+  /// (`0` = accepted), or `null` when the runtime does not export the symbol.
+  ///
+  /// Prefer the typed `BehaviorEventInput` wrapper on the facade — the `kind`
+  /// string is a closed set and an unrecognised one is dropped silently.
+  int? pushBehaviorEventJson(String eventJson) {
+    final fn = _ffi.pushBehaviorEvent;
+    if (fn == null) return null;
+    return _withCString(eventJson, (p) => fn(_handle, p));
+  }
+
+  /// Push a foreground-app context event as JSON. Returns `0` on acceptance,
+  /// or `null` when the symbol is absent.
+  ///
+  /// Two separate things must be true for this to do anything: the runtime
+  /// must be recent enough to export the symbol **and** must have been built
+  /// with the `app-context` cargo feature. Without the feature the symbol is
+  /// compiled as an inert stub that always returns `1`, so a non-zero result
+  /// here is far more likely to mean "this build has no context layer" than
+  /// "your JSON was wrong".
+  ///
+  /// Send the app *category*, never a context label: the engine derives the
+  /// 12-class `ContextLabel` itself, and two-letter app codes collide with
+  /// live label codes (`BR` is `BreakRecovery`, not "browsing/reading").
+  int? pushContextEventJson(String eventJson) {
+    final fn = _ffi.pushContextEvent;
+    if (fn == null) return null;
+    return _withCString(eventJson, (p) => fn(_handle, p));
+  }
+
+  /// Push a GPS-derived ground speed sample in **m/s**.
+  ///
+  /// The high-confidence input for `locomotion_state`; without it that axis
+  /// runs permanently on its low-confidence accel-only fallback. Speed is the
+  /// one wholly ungated channel — drained by window range and reduced to a
+  /// median — so out-of-order GPS is never dropped.
+  void pushSpeed(int tsMs, double speedMps) =>
+      _ffi.pushSpeed?.call(_handle, tsMs, speedMps);
+
+  /// Declare where the accelerometer sits. See `AccelPlacement`.
+  void setAccelPlacement(int placementCode) =>
+      _ffi.setAccelPlacement?.call(_handle, placementCode);
+
+  /// Declare that the window containing [tsMs] is a rest window.
+  ///
+  /// Without this Focus is never zeroed on a break and Capacity never takes
+  /// the recovery path, so break windows score as engaged.
+  ///
+  /// Three semantics bite in this order:
+  ///
+  /// * [tsMs] is epoch ms on the same clock as every `push_*`, and the
+  ///   declaration lands on the window whose bounds **contain** it — not on
+  ///   whichever window emerges next. Those differ whenever a lateness budget
+  ///   is deferring emission.
+  /// * It is **one-shot** by design. A sticky flag a host forgot to clear
+  ///   would pin Focus at exactly `0.0`, stop Capacity depleting and freeze
+  ///   Mental Fatigue's engaged clock for the rest of the session, silently.
+  ///   Call it once per rest *window*, not once when a break begins.
+  /// * A declaration whose window has already been emitted is discarded, not
+  ///   carried forward.
+  void declareRestWindow(int tsMs) =>
+      _ffi.declareRestWindow?.call(_handle, tsMs);
+
+  /// Drain **every** completed window, oldest first, as a JSON array.
+  ///
+  /// Prefer this to [tick] after any gap: `tick` polls one window and
+  /// `tick_all` drains them all, so a 40 s background gap does not silently
+  /// skip the windows it spanned.
+  ///
+  /// Returns `null` when the runtime does not export the symbol — callers
+  /// should fall back to [tick] in that case rather than assuming no windows.
+  String? tickAll(int nowMs) {
+    final fn = _ffi.tickAll;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle, nowMs));
+  }
+
+  /// Emit every window still held by the lateness budget, as a JSON array in
+  /// the same shape [tickAll] returns.
+  ///
+  /// Call on backgrounding and at session end, or up to one budget's worth of
+  /// windows is stranded forever. Safe to call routinely — with nothing
+  /// pending it returns `[]`.
+  String? flushPending(int nowMs) {
+    final fn = _ffi.flushPending;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle, nowMs));
+  }
+
+  /// Advance the daily accumulator to [dayIndex] (days since epoch in the
+  /// host's **local** zone).
+  ///
+  /// Skip it and the engine adopts a provisional UTC day, which is wrong for
+  /// most of the world. The index must strictly advance — a repeat or a
+  /// negative returns `ERR_DAILY_DAY_NOT_ADVANCING`. Returns `null` when the
+  /// symbol is absent.
+  int? rollDay(int dayIndex) => _ffi.rollDay?.call(_handle, dayIndex);
+
+  /// Export the per-head session state: Capacity, Mental Fatigue, Stress,
+  /// Valence and the context engine.
+  ///
+  /// Persist once per emitted window and on background/terminate.
+  /// Score today's accumulated Strain and queue it onto the next HSI frame.
+  ///
+  /// Returns the score JSON, `null` when the symbol is absent, and also `null`
+  /// when the day has no scorable component yet — nothing was accumulated, so
+  /// there is nothing to attach. That second case is normal, not an error.
+  ///
+  /// **Call this BEFORE `rollDay`.** Rolling finalises the day and clears the
+  /// very values the Strain computation reads, so a host that rolls first gets
+  /// `null` here every single day and never emits a Strain score at all.
+  /// `rollDay` does not do this for you.
+  ///
+  /// Takes no input: the engine accumulated Strain's inputs itself over the
+  /// day (heart-rate load, workout events), and asking the host to supply them
+  /// would invite a second, disagreeing copy of numbers the engine already
+  /// holds.
+  String? attachStrainScoreJson() {
+    final fn = _ffi.attachStrainScoreJson;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle));
+  }
+
+  String? exportSessionState() {
+    final fn = _ffi.exportSessionState;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle));
+  }
+
+  /// Restore a previously exported session state.
+  ///
+  /// **Must run before the first tick.** Window 1 writes each head's state
+  /// slot, so a later restore is overwritten by a cold window — and by then
+  /// the context baseline has already counted one window against the wrong
+  /// history. Returns `0` on success, `null` when the symbol is absent.
+  int? loadSessionState(String json) {
+    final fn = _ffi.loadSessionState;
+    if (fn == null) return null;
+    return _withCString(json, (p) => fn(_handle, p));
+  }
+
+  /// The comparability key for anything you cache.
+  ///
+  /// Changes whenever anything value-affecting changes, including the
+  /// `sensing` and `mask_profile` declarations. Persist it beside any cached
+  /// score: a score computed under a different `config_id` is not comparable
+  /// to a new one. Opaque — compare for equality, never parse.
+  String? configId() {
+    final fn = _ffi.configId;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle));
+  }
+
+  /// The most recent human-state vector as JSON, or `null` before the first
+  /// window has closed (a normal early-session state, not an error).
+  ///
+  /// Episodic suppression is applied at the source, so on an episodic host
+  /// neither this nor the HSI frame shows `capacity` or `mental_fatigue`.
+  String? lastHsv() {
+    final fn = _ffi.lastHsv;
+    if (fn == null) return null;
+    return _readAndFree(fn(_handle));
+  }
+
   // ── Personalization task / workout APIs ─────────────────────────────
   // Discriminants match the engine FFI contract — see
   // synheart-engine personalization API.
