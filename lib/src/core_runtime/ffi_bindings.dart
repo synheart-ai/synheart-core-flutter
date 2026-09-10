@@ -96,6 +96,32 @@ typedef _PushBehaviorDart =
     void Function(Pointer<Void> h, int ts, int t, double v);
 typedef _PushSleepC = Void Function(Pointer<Void> h, Pointer<Utf8> json);
 typedef _PushSleepDart = void Function(Pointer<Void> h, Pointer<Utf8> json);
+// Rich behavior / context events: the typed payload goes over as JSON and the
+// call reports acceptance as an int (0 = accepted). The legacy
+// `push_behavior(ts, code, value)` above carries no payload at all, so a
+// notification pushed that way has `action: None` and a typing event an
+// all-`None` `TypingSessionData`.
+typedef _PushJsonEventC =
+    Int32 Function(Pointer<Void> h, Pointer<Utf8> eventJson);
+typedef _PushJsonEventDart =
+    int Function(Pointer<Void> h, Pointer<Utf8> eventJson);
+typedef _PushSpeedC = Void Function(Pointer<Void> h, Int64 ts, Double speedMps);
+typedef _PushSpeedDart =
+    void Function(Pointer<Void> h, int ts, double speedMps);
+typedef _SetAccelPlacementC = Void Function(Pointer<Void> h, Int32 placement);
+typedef _SetAccelPlacementDart = void Function(Pointer<Void> h, int placement);
+typedef _DeclareRestWindowC = Void Function(Pointer<Void> h, Int64 tsMs);
+typedef _DeclareRestWindowDart = void Function(Pointer<Void> h, int tsMs);
+typedef _RollDayC = Int32 Function(Pointer<Void> h, Int32 dayIndex);
+typedef _RollDayDart = int Function(Pointer<Void> h, int dayIndex);
+// `tick_all` and `flush_pending` both return a JSON *array* of HSI documents,
+// oldest first — unlike `tick`, which returns at most one window.
+typedef _DrainC = Pointer<Utf8> Function(Pointer<Void> h, Int64 nowMs);
+typedef _DrainDart = Pointer<Utf8> Function(Pointer<Void> h, int nowMs);
+typedef _ReadStringC = Pointer<Utf8> Function(Pointer<Void> h);
+typedef _ReadStringDart = Pointer<Utf8> Function(Pointer<Void> h);
+typedef _LoadStringC = Int32 Function(Pointer<Void> h, Pointer<Utf8> json);
+typedef _LoadStringDart = int Function(Pointer<Void> h, Pointer<Utf8> json);
 typedef _IngestBatchC =
     Pointer<Utf8> Function(Pointer<Void> h, Pointer<Utf8> json, Int64 now);
 typedef _IngestBatchDart =
@@ -955,6 +981,101 @@ class SynheartCoreFFI {
       .lookupFunction<_PushBehaviorC, _PushBehaviorDart>(
         'synheart_core_push_behavior',
       );
+  // ── Mobile host surface (engine 0.16.0 / core-runtime 0.26.0) ────────
+  //
+  // Every symbol below is looked up optionally. The vendored runtimes in the
+  // field span several releases — the iOS xcframework and the Android .so a
+  // host ships are pinned artifacts, not the source tree — so a hard lookup
+  // here would fail library load outright for a host that simply has not
+  // re-vendored yet. Optional means the binding is present and correct the
+  // moment the artifact catches up, and a logged no-op until then.
+  //
+  // `push_context_event` needs more than a recent artifact: it is compiled to
+  // an inert stub (always returns 1) unless the runtime was built with the
+  // `app-context` cargo feature.
+
+  late final int Function(Pointer<Void>, Pointer<Utf8>)? pushBehaviorEvent =
+      _optional(
+        'synheart_core_push_behavior_event',
+        () => _lib.lookupFunction<_PushJsonEventC, _PushJsonEventDart>(
+          'synheart_core_push_behavior_event',
+        ),
+      );
+  late final int Function(Pointer<Void>, Pointer<Utf8>)? pushContextEvent =
+      _optional(
+        'synheart_core_push_context_event',
+        () => _lib.lookupFunction<_PushJsonEventC, _PushJsonEventDart>(
+          'synheart_core_push_context_event',
+        ),
+      );
+  late final void Function(Pointer<Void>, int, double)? pushSpeed = _optional(
+    'synheart_core_push_speed',
+    () => _lib.lookupFunction<_PushSpeedC, _PushSpeedDart>(
+      'synheart_core_push_speed',
+    ),
+  );
+  late final void Function(Pointer<Void>, int)? setAccelPlacement = _optional(
+    'synheart_core_set_accel_placement',
+    () => _lib.lookupFunction<_SetAccelPlacementC, _SetAccelPlacementDart>(
+      'synheart_core_set_accel_placement',
+    ),
+  );
+  late final void Function(Pointer<Void>, int)? declareRestWindow = _optional(
+    'synheart_core_declare_rest_window',
+    () => _lib.lookupFunction<_DeclareRestWindowC, _DeclareRestWindowDart>(
+      'synheart_core_declare_rest_window',
+    ),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>, int)? tickAll = _optional(
+    'synheart_core_tick_all',
+    () => _lib.lookupFunction<_DrainC, _DrainDart>('synheart_core_tick_all'),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>, int)? flushPending =
+      _optional(
+        'synheart_core_flush_pending',
+        () => _lib.lookupFunction<_DrainC, _DrainDart>(
+          'synheart_core_flush_pending',
+        ),
+      );
+  late final int Function(Pointer<Void>, int)? rollDay = _optional(
+    'synheart_core_roll_day',
+    () =>
+        _lib.lookupFunction<_RollDayC, _RollDayDart>('synheart_core_roll_day'),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>)? exportSessionState =
+      _optional(
+        'synheart_core_export_session_state',
+        () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+          'synheart_core_export_session_state',
+        ),
+      );
+  late final int Function(Pointer<Void>, Pointer<Utf8>)? loadSessionState =
+      _optional(
+        'synheart_core_load_session_state',
+        () => _lib.lookupFunction<_LoadStringC, _LoadStringDart>(
+          'synheart_core_load_session_state',
+        ),
+      );
+  late final Pointer<Utf8> Function(Pointer<Void>)? configId = _optional(
+    'synheart_core_config_id',
+    () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+      'synheart_core_config_id',
+    ),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>)? lastHsv = _optional(
+    'synheart_core_last_hsv',
+    () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+      'synheart_core_last_hsv',
+    ),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>)? attachStrainScoreJson =
+      _optional(
+        'synheart_core_attach_strain_score_json',
+        () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+          'synheart_core_attach_strain_score_json',
+        ),
+      );
+
   late final pushSleepStages = _lib.lookupFunction<_PushSleepC, _PushSleepDart>(
     'synheart_core_push_sleep_stages',
   );

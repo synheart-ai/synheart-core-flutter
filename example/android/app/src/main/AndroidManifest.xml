@@ -10,6 +10,23 @@
     <!-- Permission for checking network connectivity state -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+        Foreground service for the sensing session (mobile host guide §6.2).
+
+        The runtime has no internal ticker — the Dart side drives tick_all once
+        a second — so a backgrounded process that Android stops scheduling
+        stops emitting HSI windows entirely, silently, while the session still
+        reads as "collecting". This keeps the process alive for the whole
+        session rather than only while a keyboard is up.
+
+        Android 14+ requires the TYPED permission alongside the generic one,
+        and the type must be declared both here and at the startForeground()
+        call site. Declaring only FOREGROUND_SERVICE throws
+        MissingForegroundServiceTypeException on 14+.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Health Connect (required for Wear Module / synheart_wear) -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
     <uses-permission android:name="android.permission.health.WRITE_HEART_RATE"/>
@@ -69,6 +86,21 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!--
+            dataSync: this service exists to keep streaming and processing
+            sensor data. Note that Android 15+ caps dataSync services at
+            roughly six hours per day; past that the system stops them, and a
+            host relies on flush_pending plus the three persisted snapshots to
+            make the resumption lossless rather than pretending the gap did
+            not happen.
+
+            Not exported: nothing outside this app has any business starting it.
+        -->
+        <service
+            android:name=".SensingForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
 
         <!-- Notification Listener Service for detecting notifications -->
         <service

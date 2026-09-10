@@ -17,10 +17,13 @@ import '../widgets/ui.dart';
 ///
 /// What grounds those axes is physiological signal. Behavior and motion are
 /// collected and do reach the runtime, but they feed the digital and kinematic
-/// modalities, which the Live HSI card renders separately. On a bare phone with
-/// nothing attached the screen says all of this plainly rather than fabricating
-/// beats: synthetic samples would flow into the same longitudinal baselines as
-/// real ones and corrupt the reference ranges the runtime builds on device.
+/// modalities, which the Live HSI card renders separately.
+///
+/// On a bare phone with nothing attached, the Simulated cardiac source card
+/// will stream fabricated beats through the real ingest path so that path can
+/// be seen working. It is opt-in per session and tagged Tier-3 on the way in,
+/// and the card states the cost in place: those samples reach the same
+/// longitudinal baselines real ones do.
 class SessionScreen extends StatelessWidget {
   const SessionScreen({super.key});
 
@@ -175,12 +178,14 @@ class SessionScreen extends StatelessWidget {
               ],
             ),
 
+          const _CardiacSimulatorCard(),
+
           SectionCard(
             title: 'Signal sources',
             subtitle:
-                'What is actually feeding the runtime. This example never '
-                'fabricates biosignals — synthetic beats would corrupt the '
-                'longitudinal baselines the runtime builds on this device.',
+                'What is actually feeding the runtime. Anything the simulator '
+                'above contributes arrives here as a Tier-3 provider, '
+                'alongside whatever real sources are available.',
             trailing: StatusPill(
               c.hasBiosignalSource
                   ? 'receiving'
@@ -205,10 +210,13 @@ class SessionScreen extends StatelessWidget {
               ),
               _SourceRow(
                 label: 'Phone',
-                // Collected into an in-memory PhoneCache that nothing reads.
-                // Unlike wear and behavior, PhoneModule has no runtime wiring,
-                // so this data does not influence HSI.
-                detail: 'Motion and device context — cached locally only',
+                // Not enabled, on purpose. PhoneModule's four collectors are
+                // `Random()` generators — motion, screen state, app focus,
+                // notifications — and cardiac is the only thing this example
+                // simulates. They also never reached the runtime: PhoneModule
+                // holds no bridge reference, so it wrote to an in-memory cache
+                // with no reader.
+                detail: 'Not enabled — its collectors emit Random() values',
                 active: c.isPhoneCollecting,
                 reachesRuntime: false,
               ),
@@ -406,6 +414,50 @@ class _AxisTable extends StatelessWidget {
           ),
         ],
 
+        // §9.1 — an axis with no contributing modality is OMITTED, with its
+        // reason in `meta.synheart.state_withheld`. On mobile that is the
+        // common case, not an error, and rendering it is not optional: a
+        // canonical member is complete over `axes.<domain>` ∪ this map, so a
+        // UI that reads only the axes cannot tell "withheld, and here is why"
+        // from "this build does not produce that axis".
+        //
+        // The thing never to do is paint a default. A card showing a neutral
+        // 50 where a value was withheld is exactly the "Stress pinned at 100 /
+        // Recovery pinned at 50" failure that withholding exists to prevent.
+        if (state.stateWithheld.isNotEmpty) ...[
+          const Divider(height: 20),
+          Text(
+            'withheld this window',
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+          const SizedBox(height: 6),
+          for (final entry in state.stateWithheld.entries)
+            KeyValueRow(entry.key, entry.value),
+          const SizedBox(height: 6),
+          Text(
+            _withheldExplanation(state.stateWithheld.values.toSet()),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+
+        // §9.4 — `meta.synheart.sensing` is present only for a host that
+        // declared a profile. Shown because it is the block a consumer must
+        // stratify on rather than pool across: a Cognitive Load built without
+        // notification observation and without a context layer measures a
+        // structurally thinner subset of the same construct.
+        if (state.sensing != null) ...[
+          const Divider(height: 20),
+          Text(
+            'sensing declaration',
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+          const SizedBox(height: 6),
+          for (final entry in state.sensing!.entries)
+            KeyValueRow(entry.key, '${entry.value}'),
+        ],
+
         const Divider(height: 20),
 
         // Which modalities the runtime saw in this window, derived from
@@ -449,17 +501,32 @@ class _AxisTable extends StatelessWidget {
             // derived from `meta.provenance.sources[*].signals`, so a window
             // can carry behavior events the runtime never lists as a source —
             // watch the behavior counter below to tell the two apart.
+            // Do NOT read an empty modality set as "nothing was collected".
+            // Modality is derived from `meta.provenance.sources[*].signals`,
+            // and in core-runtime only the `ingest_batch` path registers a
+            // source at all: `push_rr_batch`, `push_behavior_event`,
+            // `push_behavior`, `push_speed` and `push_accel` all feed the
+            // engine without ever appearing in provenance. So a window can be
+            // built from plenty of signal — with grounded axes above to prove
+            // it — and still report every modality absent.
             c.behaviorEventCount > 0
                 ? 'The runtime listed no source in this window\'s provenance, '
                       'though ${c.behaviorEventCount} behavior events were '
-                      'captured and pushed.\n\n'
-                      'Digital readings lag by one window: the runtime flushes '
-                      'interaction events for the window that just closed and '
-                      'attaches them to the NEXT emission. Keep the session '
-                      'running and watch the digital axes above.'
-                : 'No modality is present. The runtime closed this window '
-                      'without a source it recognised, so every axis is '
-                      'reported at zero confidence.',
+                      'captured and pushed — and the axes above may well be '
+                      'grounded.\n\n'
+                      'That is not a contradiction, and it does not mean '
+                      'nothing was collected. Modality is derived from '
+                      'meta.provenance.sources[*].signals, and only the '
+                      'ingest_batch path registers a source: the direct FFI '
+                      'pushes (push_rr_batch, push_behavior_event, '
+                      'push_behavior, push_speed, push_accel) reach the '
+                      'engine without ever appearing in provenance. Trust the '
+                      'axis confidences above over these chips.'
+                : 'No modality is present. Either the runtime closed this '
+                      'window without a source it recognised, or every '
+                      'contributing push arrived by a direct FFI call, which '
+                      'registers no source. Read the axis confidences above '
+                      'rather than inferring from this row.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -467,9 +534,13 @@ class _AxisTable extends StatelessWidget {
         ] else if (!state.modalities.physiological) ...[
           const SizedBox(height: 8),
           Text(
-            'Signal is arriving, but none of it is physiological. The five '
-            'axes above are derived from heart rate and HRV, so they stay at '
-            'zero confidence until a wearable or BLE strap is connected.',
+            'No PHYSIOLOGICAL source is listed in this window\'s provenance. '
+            'If the five axes above are at zero confidence, that is the '
+            'reason — they are derived from heart rate and HRV, so connect a '
+            'wearable or BLE strap, or start the simulator.\n\n'
+            'If they are grounded, the source simply was not registered: only '
+            'ingest_batch registers one, so RR pushed by push_rr_batch counts '
+            'toward the axes without showing up here.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -614,4 +685,259 @@ class _SourceRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The simulated cardiac source, and the one button that starts it.
+///
+/// Deliberately the loudest card on the screen when it is running. A demo that
+/// streams invented physiology and looks identical to one reading a real strap
+/// is how fabricated numbers end up in a screenshot, a bug report, or a
+/// baseline — so the state is stated, the tier is stated, and the cost to the
+/// on-device baselines is stated where the button is rather than in a doc
+/// comment.
+class _CardiacSimulatorCard extends StatelessWidget {
+  const _CardiacSimulatorCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.watch<SynheartController>();
+    final host = c.host;
+    final streaming = host.isStreamingCardiac;
+    final bpm = host.latestSimBpm;
+    final rmssd = host.latestSimRmssd;
+
+    return SectionCard(
+      title: 'Simulated cardiac source',
+      subtitle:
+          'Fabricated beats through the real ingest path — push_rr_batch for '
+          'the intervals, push_wear_hr for the rate. The only simulated '
+          'source in this example; for exercising the integration when no '
+          'wearable is attached.',
+      trailing: StatusPill(
+        streaming ? 'streaming' : 'off',
+        tone: streaming ? PillTone.warn : PillTone.neutral,
+      ),
+      children: [
+        // The live readout is the point of the card: a developer needs to see
+        // that the rate moves, that it stays inside a plausible envelope, and
+        // that HRV collapses when the rate climbs. A single static number
+        // would prove none of that.
+        Row(
+          children: [
+            Expanded(
+              child: _SimMetric(
+                label: 'heart rate',
+                value: bpm == null ? '—' : bpm.toStringAsFixed(0),
+                unit: 'bpm',
+                emphasis: true,
+              ),
+            ),
+            Expanded(
+              child: _SimMetric(
+                label: 'RMSSD',
+                value: rmssd == null ? '—' : rmssd.toStringAsFixed(1),
+                unit: 'ms',
+              ),
+            ),
+            Expanded(
+              child: _SimMetric(label: 'episode', value: host.simActivity),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: streaming
+              ? OutlinedButton.icon(
+                  onPressed: host.stopCardiacStream,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Stop HR stream'),
+                )
+              : FilledButton.icon(
+                  // Gated on a running session for the same reason the start
+                  // button is: with no pipeline there is nothing to ingest
+                  // into, and the pushes would be silently dropped.
+                  onPressed: c.isSessionRunning
+                      ? () => host.startCardiacStream()
+                      : null,
+                  icon: const Icon(Icons.favorite_outline),
+                  label: const Text('Start HR stream'),
+                ),
+        ),
+        if (!c.isSessionRunning)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Start a session first — with no pipeline there is nothing to '
+              'ingest into.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        if (streaming) ...[
+          const Divider(height: 24),
+          KeyValueRow('RR packets pushed', '${host.rrPacketsPushed}'),
+          KeyValueRow('beats in those packets', '${host.beatsPushed}'),
+          const SizedBox(height: 8),
+          Text(
+            'One packet per notification, several intervals under a single '
+            'arrival timestamp — the shape a BLE Heart Rate Measurement '
+            'arrives in. push_rr_batch reconstructs a per-beat clock from the '
+            'anchor; a loop of push_rr sharing that stamp would collapse '
+            'every beat in the packet onto one instant.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'These beats are not real',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'They reach the SRM, which builds this subject’s '
+                'longitudinal reference ranges on this device — so run the '
+                'simulator under a throwaway subject_id and wipe local data '
+                'afterwards (Setup tab).\n\n'
+                'Cardiac is the only thing simulated here — no motion, '
+                'speed, screen state, app focus or notifications is '
+                'fabricated alongside it.\n\n'
+                'Pushed as provider "sdk_wear" (Tier-3), never "ble_hrm": '
+                'that label routes into the breathing detector’s Tier-1 '
+                'series and marks a true-RR source in research exports. '
+                'Withholding stops working the moment a host lies about '
+                'where a number came from.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SimMetric extends StatelessWidget {
+  const _SimMetric({
+    required this.label,
+    required this.value,
+    this.unit,
+    this.emphasis = false,
+  });
+
+  final String label;
+  final String value;
+  final String? unit;
+  final bool emphasis;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            // Flexible for the same reason ConsentToggle needs it: the
+            // episode metric carries values like "moderate activity", which
+            // at this text size is far wider than a third of the card. A bare
+            // Text sizes to its natural width and overflows the row.
+            Flexible(
+              child: Text(
+                value,
+                style:
+                    (emphasis
+                            ? theme.textTheme.headlineSmall
+                            : theme.textTheme.titleMedium)
+                        ?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                          fontWeight: FontWeight.w600,
+                        ),
+              ),
+            ),
+            if (unit != null) ...[
+              const SizedBox(width: 3),
+              Text(
+                unit!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Plain-language gloss for the withholding reasons a mobile host actually
+/// sees, so a developer does not have to go find the rule pack to learn that
+/// two missing axes are a correct outcome rather than a bug.
+String _withheldExplanation(Set<String> reasons) {
+  final lines = <String>[];
+  if (reasons.contains('episodic_sensing')) {
+    lines.add(
+      'episodic_sensing: capacity and mental_fatigue are withheld on every '
+      'frame of an episodic host. Both integrate a trajectory, and an app '
+      'that only runs in foreground slices cannot supply an unbroken one — '
+      'so the engine withholds them with a reason rather than publishing a '
+      'torn session clock. Declaring continuous sensing (Setup tab) brings '
+      'them back, but only a host holding a live BLE peripheral can claim '
+      'that truthfully.',
+    );
+  }
+  if (reasons.contains('cold_start_confidence_exhausted')) {
+    lines.add(
+      'cold_start_confidence_exhausted: a real reading at confidence 0, '
+      'produced when the additive cold-start penalty consumed the whole '
+      'multiplicative confidence chain. Render it as unavailable, not as a '
+      'score of zero.',
+    );
+  }
+  if (lines.isEmpty) {
+    lines.add(
+      'Each axis above was omitted for the stated reason. Show it as '
+      'unavailable — never substitute a neutral default, which reads as a '
+      'measurement.',
+    );
+  }
+  return lines.join('\n\n');
 }

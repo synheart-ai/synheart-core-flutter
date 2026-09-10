@@ -81,5 +81,20 @@ Map<String, dynamic> buildRuntimeConfigMap(
     },
     'sync': {'enabled': config.sync.enabled, 'base_url': config.sync.baseUrl},
     'privacy': {'allow_research': config.privacy.allowResearch},
+    if (config.windowMs != null && config.windowMs! > 0)
+      'window_ms': config.windowMs,
+    if (config.extraHeads.isNotEmpty)
+      'extra_heads': config.extraHeads.map((h) => h.wire).toList(),
+    // Both default to the runtime's own default (false), so the key is emitted
+    // only when the host asked for it. Sending `false` explicitly would be
+    // harmless but makes a config diff read as if the host made a choice it
+    // did not make.
+    if (config.emitDiagnostics) 'emit_diagnostics': true,
+    if (config.researchBaseline) 'research_baseline': true,
+    // Host declarations are spread rather than nested: the runtime reads
+    // `sensing` / `device_class` / `mask_profile` / `cfi_structural_components`
+    // as top-level keys. An absent key means *undeclared*, which is a distinct
+    // state from a declared default — so nothing is emitted for a null field.
+    ...config.hostDeclarations.toJson(),
   };
 }

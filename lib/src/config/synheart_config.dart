@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart'
 import '../modules/capabilities/capability_token.dart';
 import '../modules/interfaces/auth_provider.dart';
 import 'api_endpoints.dart';
+import 'host_declarations.dart';
 import 'synheart_mode.dart';
 import 'synheart_errors.dart';
+import '../modules/behavior/foreground_app_reporter.dart';
 
 String _defaultPlatformId() {
   if (kIsWeb) return 'web';
@@ -177,6 +179,63 @@ class SynheartConfig {
   /// When non-empty, overrides the bridge default filter during SDK initialization.
   final String? runtimeLogEnvFilter;
 
+  /// Host declarations that change engine output — `sensing`, `device_class`,
+  /// `mask_profile`, `cfi_structural_components`.
+  ///
+  /// Defaults to a `const HostDeclarations()`: nothing is sent, and the runtime
+  /// reproduces pre-0.16.0 behaviour exactly. Declaring any of them is a
+  /// deliberate act with consequences documented on [HostDeclarations] — most
+  /// sharply, declaring `device_class` invalidates every persisted SRM
+  /// baseline and costs the person a 30-observation re-warm across 3 days.
+  final HostDeclarations hostDeclarations;
+
+  /// Opt-in kinematic heads. Empty by default; they also require a body-worn
+  /// accelerometer placement before they produce anything.
+  final List<ExtraHead> extraHeads;
+
+  /// Publish per-head evidence terms in `meta.synheart.diagnostics`.
+  ///
+  /// The block carries each head's component breakdown (`cognitive_load` →
+  /// `{physio_raw, digital_term, cfi, ip}`, `capacity` → `{ia, delta, a_prev}`,
+  /// `mental_fatigue` → `{t, b, p, a, r}`, …), the raw `notes` a head wrote
+  /// when it withheld, and the keystroke-timing signals that are *inputs* to
+  /// the digital axes rather than axes of their own.
+  ///
+  /// **Off by default, and it should stay off for a product surface**: the axes
+  /// are the contract and this is debug telemetry that roughly doubles the size
+  /// of every stored window. Turn it on for a research capture or a validation
+  /// build — it is the difference between an export a reviewer can audit and a
+  /// list of scores they have to take on trust, because score-plus-confidence
+  /// alone cannot distinguish "this head computed and the evidence really was
+  /// zero" from "this head never received its evidence".
+  final bool emitDiagnostics;
+
+  /// Use the single-visit baseline profile (`d_min = 1`) without switching the
+  /// whole instance into [SynheartMode.research].
+  ///
+  /// `d_min` is the number of *distinct calendar days* a metric needs before
+  /// its personal baseline is promoted from Warming to Ready. The default of 3
+  /// makes Ready unreachable in a supervised single-visit protocol however much
+  /// clean data it collects, so every snapshot reports Warming and every score
+  /// leaning on a personal percentile stays a cold-start reading.
+  ///
+  /// [SynheartMode.research] already implies this, but it also caps the step to
+  /// 60 s **and** auto-opens/finalizes a lab session on session start/stop — a
+  /// host that manages its own lab-window lifecycle must not take those, or it
+  /// ends up with two competing lifecycles. This flag is the baseline profile
+  /// alone.
+  ///
+  /// Data matured under it is a **within-session reference, not a personal
+  /// baseline**, and analysis must report it as such. Off by default.
+  final bool researchBaseline;
+
+  /// Inference window length in ms. Null leaves the runtime default (60 000).
+  ///
+  /// Note `step_ms` is **not** settable through this family — the full
+  /// `synheart_core_*` runtime derives it from [mode]. Only the bare
+  /// `synheart_core_edge_*` handle takes an explicit `step_ms`.
+  final int? windowMs;
+
   SynheartConfig({
     this.appId = '',
     this.subjectId = '',
@@ -212,6 +271,11 @@ class SynheartConfig {
     this.allowUnsignedCapabilities = false,
     this.batchIngestOnStop = false,
     this.runtimeLogEnvFilter,
+    this.hostDeclarations = const HostDeclarations(),
+    this.extraHeads = const <ExtraHead>[],
+    this.emitDiagnostics = false,
+    this.researchBaseline = false,
+    this.windowMs,
   }) : platform = platform ?? _defaultPlatformId();
 
   /// Create default configuration
@@ -332,12 +396,53 @@ class BehaviorConfig {
   /// the runtime classifier can run side-by-side during the Phase-3 migration.
   final bool emitRawMotionSamples;
 
+  /// Report which application is in the foreground, so the engine has an app
+  /// identity to type each window against.
+  ///
+  /// On by default, and the default matters: with no identity the runtime's
+  /// `current_app` stays `None`, which resolves to the `Unknown` app category,
+  /// whose interpretation-mask row is **all zeros**. CFI / Cognitive Load,
+  /// Stress `B`, Mental Fatigue `B` and Focus's deviation sub-terms then read
+  /// `0` for a person who was working the whole time — a silent failure that
+  /// looks like model error.
+  ///
+  /// The identity reported is [foregroundAppId] when set, else the
+  /// `DeviceAuthConfig.packageName`, else [SynheartConfig.appId] when it looks
+  /// like a package name. With no usable id the reporter stays idle rather than
+  /// asserting a wrong one.
+  ///
+  /// Only reports while the app is foregrounded. Naming your own app while the
+  /// person is in someone else's is worse than silence — it attributes another
+  /// app's window to yours. Supply [foregroundAppSource] to report the *real*
+  /// foreground app (Android `UsageStatsManager`; iOS has no such API).
+  final bool reportForegroundApp;
+
+  /// Explicit application identifier to report, overriding the resolution
+  /// order in [reportForegroundApp].
+  ///
+  /// An Android package name or an iOS bundle id — the key the engine's app
+  /// taxonomy is looked up by. An id the taxonomy does not know still counts
+  /// as *an* identity (it holds the switch and same-app clocks); it just
+  /// resolves to the `Unknown` category.
+  final String? foregroundAppId;
+
+  /// A real foreground-app source, replacing the self-reporting default.
+  ///
+  /// Implement `ForegroundAppSource` over Android's `UsageStatsManager`
+  /// (permission `PACKAGE_USAGE_STATS`, granted through Settings) to report
+  /// what is actually in front rather than only your own app. iOS exposes no
+  /// equivalent, so the self-report is the ceiling there.
+  final ForegroundAppSource? foregroundAppSource;
+
   const BehaviorConfig({
     this.enableGestureTracking = true,
     this.enableTypingTracking = true,
     this.minIdleGapSeconds = 1.0,
     this.enableMotionLite = false,
     this.emitRawMotionSamples = false,
+    this.reportForegroundApp = true,
+    this.foregroundAppId,
+    this.foregroundAppSource,
   });
 }
 
