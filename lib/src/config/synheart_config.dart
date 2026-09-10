@@ -193,6 +193,42 @@ class SynheartConfig {
   /// accelerometer placement before they produce anything.
   final List<ExtraHead> extraHeads;
 
+  /// Publish per-head evidence terms in `meta.synheart.diagnostics`.
+  ///
+  /// The block carries each head's component breakdown (`cognitive_load` →
+  /// `{physio_raw, digital_term, cfi, ip}`, `capacity` → `{ia, delta, a_prev}`,
+  /// `mental_fatigue` → `{t, b, p, a, r}`, …), the raw `notes` a head wrote
+  /// when it withheld, and the keystroke-timing signals that are *inputs* to
+  /// the digital axes rather than axes of their own.
+  ///
+  /// **Off by default, and it should stay off for a product surface**: the axes
+  /// are the contract and this is debug telemetry that roughly doubles the size
+  /// of every stored window. Turn it on for a research capture or a validation
+  /// build — it is the difference between an export a reviewer can audit and a
+  /// list of scores they have to take on trust, because score-plus-confidence
+  /// alone cannot distinguish "this head computed and the evidence really was
+  /// zero" from "this head never received its evidence".
+  final bool emitDiagnostics;
+
+  /// Use the single-visit baseline profile (`d_min = 1`) without switching the
+  /// whole instance into [SynheartMode.research].
+  ///
+  /// `d_min` is the number of *distinct calendar days* a metric needs before
+  /// its personal baseline is promoted from Warming to Ready. The default of 3
+  /// makes Ready unreachable in a supervised single-visit protocol however much
+  /// clean data it collects, so every snapshot reports Warming and every score
+  /// leaning on a personal percentile stays a cold-start reading.
+  ///
+  /// [SynheartMode.research] already implies this, but it also caps the step to
+  /// 60 s **and** auto-opens/finalizes a lab session on session start/stop — a
+  /// host that manages its own lab-window lifecycle must not take those, or it
+  /// ends up with two competing lifecycles. This flag is the baseline profile
+  /// alone.
+  ///
+  /// Data matured under it is a **within-session reference, not a personal
+  /// baseline**, and analysis must report it as such. Off by default.
+  final bool researchBaseline;
+
   /// Inference window length in ms. Null leaves the runtime default (60 000).
   ///
   /// Note `step_ms` is **not** settable through this family — the full
@@ -237,6 +273,8 @@ class SynheartConfig {
     this.runtimeLogEnvFilter,
     this.hostDeclarations = const HostDeclarations(),
     this.extraHeads = const <ExtraHead>[],
+    this.emitDiagnostics = false,
+    this.researchBaseline = false,
     this.windowMs,
   }) : platform = platform ?? _defaultPlatformId();
 
