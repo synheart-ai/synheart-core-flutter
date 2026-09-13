@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:synheart_core/synheart_core.dart' show HSIState, HSIAxisValue;
 
+import '../sdk/axis_coverage.dart';
 import '../sdk/synheart_controller.dart';
 import '../widgets/ui.dart';
 
@@ -548,6 +549,9 @@ class _AxisTable extends StatelessWidget {
         ],
 
         const Divider(height: 20),
+        _AxisCoverageBlock(state: state),
+
+        const Divider(height: 20),
         KeyValueRow(
           'timestamp',
           DateTime.fromMillisecondsSinceEpoch(
@@ -940,4 +944,121 @@ String _withheldExplanation(Set<String> reasons) {
     );
   }
   return lines.join('\n\n');
+}
+
+/// Every canonical HSI 1.3 member and what became of it this window.
+///
+/// The rows above show the eight axes this SDK has typed accessors for. That
+/// is the right surface for a product and the wrong one for answering "how
+/// much of the engine is actually reaching me?": a member with no accessor is
+/// invisible, so a build emitting none of the kinematic domain looks exactly
+/// like one emitting all of it.
+///
+/// Three states, never collapsed — see [AxisCoverage]. A withheld axis is a
+/// deliberate refusal with a reason attached; an absent one is a head that did
+/// not run. Both are honest, and neither is a zero.
+class _AxisCoverageBlock extends StatelessWidget {
+  const _AxisCoverageBlock({required this.state});
+
+  final HSIState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final report = buildAxisCoverage(state.rawJson);
+
+    if (report == null) {
+      return Text(
+        'Could not parse this window\'s payload, so no coverage roll call. '
+        'HSIState.rawJson holds it verbatim.',
+        style: muted,
+      );
+    }
+
+    final mono = theme.textTheme.bodySmall?.copyWith(
+      fontFamily: 'monospace',
+      height: 1.5,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'axis coverage — all 18 canonical members',
+          style: theme.textTheme.labelMedium,
+        ),
+        const SizedBox(height: 6),
+        Text(report.summary, style: theme.textTheme.bodyMedium),
+        if (report.windowConfidence != null)
+          Text(
+            'window confidence ${report.windowConfidence!.toStringAsFixed(2)} '
+            '— the MAX across readings, not a per-axis figure',
+            style: muted,
+          ),
+        const SizedBox(height: 10),
+
+        for (final domain in AxisDomain.values) ...[
+          Text(domain.wire, style: theme.textTheme.labelSmall),
+          const SizedBox(height: 2),
+          // Horizontally scrollable: a withheld reason is as long as the
+          // engine makes it, and wrapping a fixed-width table destroys the
+          // alignment that makes it scannable.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Text(report.domainLines(domain).join('\n'), style: mono),
+          ),
+          const SizedBox(height: 10),
+        ],
+
+        // The fact that explains a dark kinematic domain. Outside pocket/waist
+        // the four heads withhold by design, and there is no hand-held
+        // placement — so during typing this is the expected state, not a bug.
+        if (report.placement != null) ...[
+          Text(
+            'accelerometer placement: ${report.placement} · '
+            '${report.inKinematicEnvelope == true ? 'inside' : 'outside'} the '
+            'pocket/waist envelope. Outside it every kinematic head withholds '
+            'by design. Declare a placement on the Host tab to change it.',
+            style: muted,
+          ),
+          const SizedBox(height: 10),
+        ],
+
+        if (report.directionNotes.isNotEmpty) ...[
+          Text(
+            'not higher_is_more — read the scale before the number:\n'
+            '${report.directionNotes.join('\n')}',
+            style: muted,
+          ),
+          const SizedBox(height: 10),
+        ],
+
+        // Not an error: the engine may grow a head before this app learns it.
+        // Printing the name is how that gets noticed rather than dropped.
+        if (report.unknownMembers.isNotEmpty) ...[
+          Text(
+            'emitted but not in this app\'s canonical list: '
+            '${report.unknownMembers.join(', ')}',
+            style: muted,
+          ),
+          const SizedBox(height: 10),
+        ],
+
+        Text(
+          'score is 0–100, c is that axis\'s own confidence. '
+          '! marks a reading published at zero confidence — the engine '
+          'reporting no evidence, which is not the same as a low score and '
+          'which no display threshold can rescue.\n\n'
+          'absent means the member appeared in neither axes[] nor either '
+          'withhold map (state_withheld, motion.kinematic_withheld): no head '
+          'ran, or this build has none. withheld means the engine computed '
+          'it and declined to publish, and the reason is printed verbatim.',
+          style: muted,
+        ),
+      ],
+    );
+  }
 }
