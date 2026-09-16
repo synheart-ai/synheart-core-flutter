@@ -3337,6 +3337,21 @@ class Synheart {
     _coreRuntime?.pushWristAccel(tsMs, x, y, z);
   }
 
+  /// Push one sample from a body-worn accelerometer — a chest strap or a
+  /// watch — tagged with where it sits. The general form of
+  /// [pushWristAccel]: the runtime keeps worn motion apart from phone motion
+  /// and reports it with its placement. `x` / `y` / `z` in m/s²
+  /// (gravity-included); `tsMs` on the phone clock.
+  static void pushWornAccel(
+    int tsMs,
+    double x,
+    double y,
+    double z,
+    AccelPlacement placement,
+  ) {
+    _coreRuntime?.pushWornAccel(tsMs, x, y, z, placement.code);
+  }
+
   // ── Personalization task / workout APIs ─────────────────────────────
   // the personalization spec. Forwarded directly to the engine pipeline
   // (no batch ingest) because they set pipeline state rather than
