@@ -90,6 +90,12 @@ typedef _PushAccelC =
     Void Function(Pointer<Void> h, Int64 ts, Double x, Double y, Double z);
 typedef _PushAccelDart =
     void Function(Pointer<Void> h, int ts, double x, double y, double z);
+typedef _PushWristAccelC =
+    Void Function(Pointer<Void> h, Int64 ts, Double x, Double y, Double z);
+typedef _PushWristAccelDart =
+    void Function(Pointer<Void> h, int ts, double x, double y, double z);
+typedef _SetAccelPlacementC = Void Function(Pointer<Void> h, Int32 placement);
+typedef _SetAccelPlacementDart = void Function(Pointer<Void> h, int placement);
 typedef _PushBehaviorC =
     Void Function(Pointer<Void> h, Int64 ts, Int32 t, Double v);
 typedef _PushBehaviorDart =
@@ -108,8 +114,6 @@ typedef _PushJsonEventDart =
 typedef _PushSpeedC = Void Function(Pointer<Void> h, Int64 ts, Double speedMps);
 typedef _PushSpeedDart =
     void Function(Pointer<Void> h, int ts, double speedMps);
-typedef _SetAccelPlacementC = Void Function(Pointer<Void> h, Int32 placement);
-typedef _SetAccelPlacementDart = void Function(Pointer<Void> h, int placement);
 typedef _DeclareRestWindowC = Void Function(Pointer<Void> h, Int64 tsMs);
 typedef _DeclareRestWindowDart = void Function(Pointer<Void> h, int tsMs);
 typedef _RollDayC = Int32 Function(Pointer<Void> h, Int32 dayIndex);
@@ -977,6 +981,10 @@ class SynheartCoreFFI {
   late final pushAccel = _lib.lookupFunction<_PushAccelC, _PushAccelDart>(
     'synheart_core_push_accel',
   );
+  late final pushWristAccel = _lib
+      .lookupFunction<_PushWristAccelC, _PushWristAccelDart>(
+        'synheart_core_push_wrist_accel',
+      );
   late final pushBehavior = _lib
       .lookupFunction<_PushBehaviorC, _PushBehaviorDart>(
         'synheart_core_push_behavior',
