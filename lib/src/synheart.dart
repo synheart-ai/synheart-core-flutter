@@ -3319,10 +3319,22 @@ class Synheart {
   /// or platform-specific bridges) should call this at ≥ 25 Hz during
   /// sessions for the engine to reach a Ready motion baseline.
   ///
-  /// `x` / `y` / `z` are in m/s² (gravity-included). The engine
-  /// internally subtracts gravity and computes magnitude.
+  /// `x` / `y` / `z` are in m/s² (gravity-included), as platform sensor
+  /// plugins report them. The bridge converts to the runtime's g
+  /// convention; the engine subtracts gravity and computes magnitude.
+  /// Declare where the phone is mounted with [setAccelPlacement] or the
+  /// kinematic features withhold.
   static void pushAccel(int tsMs, double x, double y, double z) {
     _coreRuntime?.pushAccel(tsMs, x, y, z);
+  }
+
+  /// Push one sample from a wrist-worn accelerometer (a watch). This is a
+  /// second motion stream beside the phone's: the runtime reports wrist
+  /// motion separately from phone motion and never mixes the two.
+  /// `x` / `y` / `z` in m/s² (gravity-included); `tsMs` is the watch's
+  /// sample timestamp, not the arrival time.
+  static void pushWristAccel(int tsMs, double x, double y, double z) {
+    _coreRuntime?.pushWristAccel(tsMs, x, y, z);
   }
 
   // ── Personalization task / workout APIs ─────────────────────────────

@@ -991,8 +991,24 @@ class CoreRuntimeBridge {
     double respiration = -1.0,
   }) => _ffi.pushVendorVitals(_handle, tsMs, spo2, respiration);
 
-  void pushAccel(int tsMs, double x, double y, double z) =>
-      _ffi.pushAccel(_handle, tsMs, x, y, z);
+  /// The runtime takes acceleration in g; the public API takes m/s².
+  static const double _standardGravity = 9.80665;
+
+  void pushAccel(int tsMs, double x, double y, double z) => _ffi.pushAccel(
+    _handle,
+    tsMs,
+    x / _standardGravity,
+    y / _standardGravity,
+    z / _standardGravity,
+  );
+  void pushWristAccel(int tsMs, double x, double y, double z) =>
+      _ffi.pushWristAccel(
+        _handle,
+        tsMs,
+        x / _standardGravity,
+        y / _standardGravity,
+        z / _standardGravity,
+      );
   void pushBehavior(int tsMs, int eventType, double value) =>
       _ffi.pushBehavior(_handle, tsMs, eventType, value);
 
