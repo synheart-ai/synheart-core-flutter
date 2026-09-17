@@ -1009,6 +1009,15 @@ class CoreRuntimeBridge {
         y / _standardGravity,
         z / _standardGravity,
       );
+  void pushWornAccel(int tsMs, double x, double y, double z, int placement) =>
+      _ffi.pushWornAccel(
+        _handle,
+        tsMs,
+        x / _standardGravity,
+        y / _standardGravity,
+        z / _standardGravity,
+        placement,
+      );
   void pushBehavior(int tsMs, int eventType, double value) =>
       _ffi.pushBehavior(_handle, tsMs, eventType, value);
 

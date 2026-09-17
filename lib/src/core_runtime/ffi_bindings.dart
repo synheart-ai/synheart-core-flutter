@@ -94,6 +94,24 @@ typedef _PushWristAccelC =
     Void Function(Pointer<Void> h, Int64 ts, Double x, Double y, Double z);
 typedef _PushWristAccelDart =
     void Function(Pointer<Void> h, int ts, double x, double y, double z);
+typedef _PushWornAccelC =
+    Void Function(
+      Pointer<Void> h,
+      Int64 ts,
+      Double x,
+      Double y,
+      Double z,
+      Int32 placement,
+    );
+typedef _PushWornAccelDart =
+    void Function(
+      Pointer<Void> h,
+      int ts,
+      double x,
+      double y,
+      double z,
+      int placement,
+    );
 typedef _SetAccelPlacementC = Void Function(Pointer<Void> h, Int32 placement);
 typedef _SetAccelPlacementDart = void Function(Pointer<Void> h, int placement);
 typedef _PushBehaviorC =
@@ -984,6 +1002,10 @@ class SynheartCoreFFI {
   late final pushWristAccel = _lib
       .lookupFunction<_PushWristAccelC, _PushWristAccelDart>(
         'synheart_core_push_wrist_accel',
+      );
+  late final pushWornAccel = _lib
+      .lookupFunction<_PushWornAccelC, _PushWornAccelDart>(
+        'synheart_core_push_worn_accel',
       );
   late final pushBehavior = _lib
       .lookupFunction<_PushBehaviorC, _PushBehaviorDart>(
