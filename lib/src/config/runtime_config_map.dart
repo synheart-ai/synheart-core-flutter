@@ -81,5 +81,14 @@ Map<String, dynamic> buildRuntimeConfigMap(
     },
     'sync': {'enabled': config.sync.enabled, 'base_url': config.sync.baseUrl},
     'privacy': {'allow_research': config.privacy.allowResearch},
+    if (config.windowMs != null && config.windowMs! > 0)
+      'window_ms': config.windowMs,
+    if (config.extraHeads.isNotEmpty)
+      'extra_heads': config.extraHeads.map((h) => h.wire).toList(),
+    // Host declarations are spread rather than nested: the runtime reads
+    // `sensing` / `device_class` / `mask_profile` / `cfi_structural_components`
+    // as top-level keys. An absent key means *undeclared*, which is a distinct
+    // state from a declared default — so nothing is emitted for a null field.
+    ...config.hostDeclarations.toJson(),
   };
 }

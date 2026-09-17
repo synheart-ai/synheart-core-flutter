@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'core_runtime/core_runtime_bridge.dart';
 import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
 import 'config/runtime_config_map.dart';
 import 'config/synheart_config.dart';
+import 'models/behavior_event_input.dart';
 import 'modules/behavior/behavior_code.dart';
 import 'modules/cloud/device_auth_provider.dart';
 import 'core/logger.dart';
@@ -280,6 +283,45 @@ class SynheartInstance {
   /// carries the same behavioral metrics the personal runtime produces.
   void pushBehaviorTouch(int tsMs) =>
       _bridge.pushBehavior(tsMs, RuntimeBehaviorEvent.input.code, 1.0);
+
+  /// Push a typed behavior event carrying its full payload — most importantly
+  /// a windowed [TypingSessionData], which the legacy int-coded path cannot
+  /// express at all.
+  ///
+  /// Returns the runtime status (`0` = accepted), or `null` when this instance
+  /// is disposed or the runtime does not export the symbol.
+  ///
+  /// Do not also push the raw keystrokes behind a `Typing` summary — the
+  /// engine counts both and every rate feature roughly doubles.
+  int? pushBehaviorEvent(BehaviorEventInput event) => _disposed
+      ? null
+      : _bridge.pushBehaviorEventJson(jsonEncode(event.toJson()));
+
+  /// Declare the window containing [tsMs] to be a rest window. One-shot: call
+  /// once per rest window, not once when a break begins.
+  void declareRestWindow(int tsMs) {
+    if (!_disposed) _bridge.declareRestWindow(tsMs);
+  }
+
+  /// Drain every completed window as a JSON array, oldest first. Prefer this
+  /// to [tick] after a gap. `null` when disposed or unsupported.
+  String? tickAll(int nowMs) => _disposed ? null : _bridge.tickAll(nowMs);
+
+  /// Emit every window still held by the lateness budget. Call on
+  /// backgrounding and at session end.
+  String? flushPending(int nowMs) =>
+      _disposed ? null : _bridge.flushPending(nowMs);
+
+  /// Export this instance's per-head session state for persistence.
+  String? exportSessionState() =>
+      _disposed ? null : _bridge.exportSessionState();
+
+  /// Restore session state. Must run before this instance's first [tick].
+  int? loadSessionState(String json) =>
+      _disposed ? null : _bridge.loadSessionState(json);
+
+  /// This instance's comparability key. Persist it beside any cached score.
+  String? configId() => _disposed ? null : _bridge.configId();
 
   // ── Session lifecycle (drives the pipeline the lab window records over) ───────
 

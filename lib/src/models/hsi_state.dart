@@ -289,6 +289,39 @@ Tiers _deriveTiers(Map<String, dynamic> payload) {
   return Tiers(physiological: physio, kinematic: kin, digital: dig);
 }
 
+/// Read `meta.synheart` off a parsed payload, or null when it is absent.
+///
+/// Both of the maps below hang off this one block, and it is legitimately
+/// missing: `sensing` appears only when the host declared a profile, and a
+/// runtime that predates the block emits neither.
+Map<String, dynamic>? _synheartMeta(Map<String, dynamic> payload) {
+  final meta = payload['meta'];
+  if (meta is! Map) return null;
+  final synheart = meta['synheart'];
+  return synheart is Map ? synheart.cast<String, dynamic>() : null;
+}
+
+/// `meta.synheart.state_withheld` — axis name to the reason it was omitted.
+///
+/// A reading with no contributing modality is omitted rather than defaulted,
+/// and this map is where the omission is explained (`episodic_sensing`,
+/// `cold_start_confidence_exhausted`, …). On mobile that is the common case,
+/// not the exception, so a UI that only reads `axes.*` cannot tell "withheld
+/// with a reason" from "this build does not produce that axis".
+///
+/// A canonical member is complete over `axes.<domain>` ∪ this map — check both
+/// before concluding a member is unsupported, and never paint a default in
+/// place of a withheld value.
+Map<String, String> _deriveStateWithheld(Map<String, dynamic> payload) {
+  final withheld = _synheartMeta(payload)?['state_withheld'];
+  if (withheld is! Map) return const <String, String>{};
+  return <String, String>{
+    for (final entry in withheld.entries)
+      if (entry.key is String && entry.value is String)
+        entry.key as String: entry.value as String,
+  };
+}
+
 /// Typed HSI state emitted by `Synheart.onStateUpdate`.
 ///
 /// Provides typed axis accessors and retains `rawJson` for diagnostic use.
@@ -302,6 +335,31 @@ class HSIState {
   final Modalities modalities;
   final Tiers tiers;
   final String rawJson;
+
+  /// Axes the engine omitted, mapped to why — `meta.synheart.state_withheld`.
+  ///
+  /// Empty when nothing was withheld. Read this alongside [hsi]: an axis
+  /// missing from both is genuinely unsupported by the build, whereas one
+  /// listed here was deliberately not produced and must be rendered as
+  /// unavailable rather than as a neutral default.
+  ///
+  /// Common mobile reasons: `episodic_sensing` withholds `capacity` and
+  /// `mental_fatigue` on every frame; `cold_start_confidence_exhausted` marks
+  /// a Capacity reading whose confidence chain was consumed by the cold-start
+  /// penalty, which is unavailable rather than a score of zero.
+  final Map<String, String> stateWithheld;
+
+  /// `meta.synheart.sensing` — the sensing profile this window was produced
+  /// under, or null when the host declared none.
+  ///
+  /// Present only for a host that passed `HostDeclarations.sensing`. Consumers
+  /// comparing across platforms should **stratify on this block rather than
+  /// pooling**: a Cognitive Load built without notification observation and
+  /// without a context layer measures a structurally thinner subset of the
+  /// same construct. `rest_declared` also rides here, which is why a
+  /// `declareRestWindow` on an undeclared host still gates correctly but has
+  /// nothing on the wire to explain the `focus = 0.0`.
+  final Map<String, dynamic>? sensing;
 
   /// Non-null when [fromJson] could not parse [rawJson] and fell back to empty
   /// axes.
@@ -324,6 +382,8 @@ class HSIState {
     required this.rawJson,
     this.modalities = const Modalities(),
     this.tiers = const Tiers(),
+    this.stateWithheld = const <String, String>{},
+    this.sensing,
     this.parseError,
   });
 
@@ -357,6 +417,10 @@ class HSIState {
         hsi: axes,
         modalities: _deriveModalities(map),
         tiers: _deriveTiers(map),
+        stateWithheld: _deriveStateWithheld(map),
+        sensing: _synheartMeta(map)?['sensing'] is Map
+            ? (_synheartMeta(map)!['sensing'] as Map).cast<String, dynamic>()
+            : null,
         rawJson: json,
       );
     } catch (e) {

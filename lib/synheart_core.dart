@@ -31,6 +31,9 @@ export 'src/core/logger.dart' show SynheartLogger;
 
 // Configuration
 export 'src/config/api_endpoints.dart';
+// Host declarations that change engine output — sensing profile, device class,
+// interpretation-mask profile, CFI coverage denominator, kinematic heads.
+export 'src/config/host_declarations.dart';
 export 'src/config/synheart_config.dart';
 export 'src/config/synheart_feature.dart';
 export 'src/config/synheart_mode.dart';
@@ -67,6 +70,13 @@ export 'src/models/data_deletion.dart';
 // Typed state and metrics
 export 'src/models/hsi_state.dart';
 export 'src/models/metric_event.dart';
+
+// Rich behavior events (the typed payload path) + accelerometer placement.
+export 'src/models/behavior_event_input.dart';
+export 'src/models/context_event_input.dart';
+export 'src/modules/behavior/foreground_app_reporter.dart'
+    show ForegroundAppSource, SelfForegroundAppSource;
+export 'src/models/accel_placement.dart';
 
 // Personalization task tags .
 export 'src/models/task_type.dart';

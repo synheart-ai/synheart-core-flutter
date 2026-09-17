@@ -7,6 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — data correctness
+
+- **Accelerometer samples were pushed in m/s² into an API that takes g**, so
+  every sample reached the engine ~9.81x too large. `synheart_behavior`'s
+  `MotionSample` is documented as m/s² with gravity included (Android's raw
+  `TYPE_ACCELEROMETER`); the engine's `push_accel` takes **g** and multiplies by
+  `9.80665` internally. A phone at rest reported ~9.81 and the engine stored
+  ~96 m/s². It cleared the runtime's own ±50 sanity gate because that gate runs
+  on the pre-multiply value, so nothing ever complained.
+
+  The SDK now converts at the push boundary. What this was breaking:
+  `activity_state` and `locomotion_state` (magnitude and jerk cut-points were
+  all off by the same factor), the RulePack still-gate — which never saw
+  stillness, so **no personal physiological baseline could accumulate at all**
+  — and any host reading `meta.synheart.motion.accel_rms` back out for its own
+  rest detection, which could never satisfy a low-motion clause. `postural_state`
+  was unaffected (APE is an angle, and angles are scale-invariant).
+
+### Added — the context evidence channel
+
+- **`ContextEventInput`** — typed payloads for `push_context_event`, the channel
+  that feeds the person-relative context window and so `context.deviation.*`.
+  Those deviations are the only source of Cognitive Load's friction index
+  (CFI), and before this the mobile stack pushed nothing onto this channel, so
+  `pause_elevation`, `err_elevation` and `scroll_deviation` were structurally
+  zero on every window regardless of how much the person interacted.
+
+  It is a **second** channel, not an alternative to `pushBehaviorEvent`: the two
+  write to different runtime buffers with different consumers, so one event on
+  each per user action is correct and is not a double count.
+
+- **BREAKING: `Synheart.pushContextEvent` now takes a `ContextEventInput`**
+  instead of a `Map<String, dynamic>`. Existing call sites fail to compile
+  rather than warn; that is deliberate, because the old map form documented
+  a shape the runtime **never accepted**, so every such call site is a call
+  site that was silently doing nothing. The shape it documented was
+  `{ts_ms, app_id, category}`; the runtime instead
+  deserializes this channel into an externally-tagged keyboard / pointer /
+  shortcut enum with no app-category variant, so every such push was rejected.
+  The failure was invisible: a rejected payload returns the same `1` as a
+  runtime built without the `app-context` cargo feature. The raw escape hatch
+  is now `Synheart.pushContextEventJson(Map)`.
+
+  The wire shape is pinned against the runtime's documented form by
+  `test/context_event_input_test.dart`, because getting it wrong is silent.
+
+- The SDK **derives context events from native gestures automatically** —
+  scroll to `Mouse`/`Scroll` with its direction, swipe to `Mouse`/`Move` with a
+  distance. Native taps are deliberately **not** forwarded: Android's input
+  collector reports every keystroke as a `tap`, so forwarding them would
+  inflate `N_click` with typing while leaving `N_key` — the denominator of
+  `err_rate = N_corr / N_key` — at zero. Keyboard evidence must come from the
+  host's text layer via `ContextEventInput.textChange`, which is the only place
+  an insertion can be told from a deletion. Send **both** directions.
+
+### Added — foreground app identity
+
+- **`BehaviorEventInput.appForeground(tsMs, app)`** and
+  **`Synheart.pushAppForeground(app)`** — the foreground *resolve*, as opposed
+  to the `appSwitch` *edge*. This kind had no Dart factory at all, which meant
+  app identity could not reach the engine by any route: `app_switch` only fires
+  on a transition, and the native collector reports both of its ids as null.
+
+  With no identity the runtime's `current_app` stays `None`, `None` resolves to
+  the `Unknown` app category, and `Unknown`'s interpretation-mask row is **all
+  zeros** — so CFI / Cognitive Load, Stress `B`, Mental Fatigue `B` and Focus's
+  deviation sub-terms all read `0` for a person who was working the whole time.
+
+- **`ForegroundAppReporter`** runs the resolve for the life of a session: once
+  at session start, then on a 30 s heartbeat (shorter than the default 60 s HSI
+  window, so no window goes without an identity). It is gated on app lifecycle
+  by an `AppLifecycleListener` the SDK owns: the heartbeat stops on
+  `hidden` / `paused` / `detached` and resumes with an immediate resolve on
+  `resumed`, because the default source names *this* app and continuing to
+  assert it from the background is worse than silence — the engine would
+  attribute another app's window to this one. `inactive` is deliberately not
+  a stop: a call banner or the app switcher is not leaving. A headless host
+  with no bound `WidgetsBinding` logs once and runs ungated, which is correct
+  there since it has no foreground to leave. Repeats are safe — the
+  engine treats an unchanged app as a steady-state observation and does not bump
+  the switch count, so a heartbeat cannot fabricate fragmentation.
+
+- **`BehaviorConfig.reportForegroundApp`** (default `true`),
+  **`foregroundAppId`**, and **`foregroundAppSource`**. The default source
+  reports the host's own application id, resolved from `foregroundAppId`, else
+  `DeviceAuthConfig.packageName`, else `SynheartConfig.appId` when it looks like
+  a package name rather than a Synheart-issued `app_…` id. Implement
+  `ForegroundAppSource` over Android's `UsageStatsManager` (permission
+  `PACKAGE_USAGE_STATS`) to report what is *actually* in front; iOS exposes no
+  equivalent API, so the self-report is the ceiling there.
+
+### Added — the daily loop
+
+- **`Synheart.attachStrainScore()`**, binding
+  `synheart_core_attach_strain_score_json`. This symbol had no Dart binding, and
+  `rollDay` does not score for you — it validates the index and folds the day
+  into the longitudinal baselines, and that fold **clears the values Strain is
+  computed from**. So a host that rolled without attaching first got no Strain
+  score, ever, while the load itself still reached the baselines: nothing looked
+  broken except a score that was always absent. Call it **before** `rollDay`.
+
+### Changed
+
+- `TypingSessionData`'s documentation no longer claims `number_of_backspace` /
+  `number_of_delete` feed CFI. They feed `TypingFluency`; CFI's correction
+  sub-component reads `context.deviation.err_elevation`, which comes from the
+  context channel. The advice to send them was right, the reason was wrong, and
+  it would have sent someone hunting in the wrong place.
+
+### Example app
+
+- The `push_context_event` demo sent the payload shape that never parsed. It is
+  now two buttons for the two real channels — declare foreground app, push a
+  context event — with the counters separated.
+- The typing probe now pushes a keyboard context event per change alongside its
+  windowed summary, so CFI has a correction rate with a real denominator.
+- `_rollDayIfNeeded` attaches the Strain score before rolling.
+- A **lateness budget is now declared unconditionally** when the host profile is
+  declared. It is not optional for this host: the engine's HSI window is aligned
+  to the first signal rather than to a fixed grid, so a host aggregating into
+  its own fixed-grid micro-windows has one micro-window straddle every HSI
+  boundary — stamped before it, flushed after it, accepted by the ingest gate
+  and then read by no window. That is ~1/6 of the typing evidence lost every
+  window with no counter to show it. Declaring a budget requires declaring a
+  sensing *mode* too, because `parse_sensing` accepts `"auto"` only as a
+  top-level string; the mode now defaults to continuous on Android and episodic
+  on iOS, matching what the toggle already asserts.
+
 ## [0.13.0] - 2026-09-04
 
 ### Changed — BREAKING

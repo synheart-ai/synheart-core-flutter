@@ -180,16 +180,30 @@ class ConsentToggle extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
+                    // Flexible, not a bare Text: a title long enough to need
+                    // two lines otherwise sizes to its natural width and
+                    // overflows the row, taking the "unsaved" pill off-screen
+                    // with it. The consent titles here name config keys
+                    // (`device_class`, `mask_profile`), so they are long by
+                    // nature rather than by accident.
+                    Flexible(
+                      child: Text(
+                        title,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     if (pending) ...[
                       const SizedBox(width: 8),
-                      const StatusPill('unsaved', tone: PillTone.warn),
+                      // Pinned to the first line of a wrapped title rather
+                      // than centred against the whole block.
+                      const Padding(
+                        padding: EdgeInsets.only(top: 1),
+                        child: StatusPill('unsaved', tone: PillTone.warn),
+                      ),
                     ],
                   ],
                 ),

@@ -248,7 +248,25 @@ class HSI11Domain {
 
 class HSI11Reading {
   final String axis;
+
+  /// The reading's value, coerced to `0.0` when the wire said `null`.
+  ///
+  /// **Prefer [scoreOrNull] for anything that renders or aggregates.** The
+  /// engine emits `"score": null` to mean *this axis produced no value*, which
+  /// is a different claim from a measured zero — and for a `lower_is_more`
+  /// axis the two are opposites, since `1 - 0.0` is the maximum magnitude.
+  /// This field cannot express that distinction and is kept only so existing
+  /// consumers keep compiling.
   final double score;
+
+  /// The reading's value, or `null` when the engine produced none.
+  ///
+  /// This is the honest form: `null` means withheld/unavailable and `0.0`
+  /// means measured zero. Gate on it (or on [confidence]) rather than treating
+  /// a zero as absence — a genuine 0.0 is evidence, and dropping it biases
+  /// every mean computed over an inverse-sense axis.
+  final double? scoreOrNull;
+
   final double confidence;
   final String windowId;
   final String? direction;
@@ -256,6 +274,8 @@ class HSI11Reading {
   final List<String>? evidenceSourceIds;
   final String? notes;
 
+  /// Construct from a known value. [scoreOrNull] mirrors [score], because a
+  /// caller supplying a concrete double is asserting the value exists.
   HSI11Reading({
     required this.axis,
     required this.score,
@@ -265,7 +285,25 @@ class HSI11Reading {
     this.unit,
     this.evidenceSourceIds,
     this.notes,
-  });
+  }) : scoreOrNull = score;
+
+  /// Construct from a possibly-absent value — the wire form.
+  ///
+  /// Separate from the default constructor because an optional
+  /// `double? scoreOrNull` parameter cannot tell "omitted" from "explicitly
+  /// null": defaulting it back to `score` silently re-flattens exactly the
+  /// distinction this type exists to preserve.
+  HSI11Reading.raw({
+    required this.axis,
+    required double? score,
+    required this.confidence,
+    required this.windowId,
+    this.direction,
+    this.unit,
+    this.evidenceSourceIds,
+    this.notes,
+  }) : score = score ?? 0.0,
+       scoreOrNull = score;
 
   factory HSI11Reading.fromJson(Map<String, dynamic> json) {
     // 1.1 → `axis`, 1.2 → `name`. Required either way.
@@ -280,13 +318,14 @@ class HSI11Reading {
     } else {
       windowId = '';
     }
-    return HSI11Reading(
+    // 1.2+ allows `score: null` to express "score unavailable" (paired with
+    // confidence and an explanatory `notes`). Both forms are kept: `score`
+    // coerces to 0 for the existing consumers, `scoreOrNull` preserves the
+    // distinction for anything that renders or aggregates.
+    final rawScore = (json['score'] as num?)?.toDouble();
+    return HSI11Reading.raw(
       axis: axis,
-      // 1.2 allows `score: null` to express "score unavailable"
-      // (paired with confidence and explanatory `notes`). Coerce to 0
-      // and rely on `confidence` for downstream gating; HSIReading
-      // itself can't represent null without breaking every consumer.
-      score: (json['score'] as num?)?.toDouble() ?? 0.0,
+      score: rawScore,
       confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
       windowId: windowId,
       direction: json['direction'] as String?,
@@ -299,7 +338,8 @@ class HSI11Reading {
 
   Map<String, dynamic> toJson() => {
     'axis': axis,
-    'score': score,
+    // Round-trips the withheld form rather than flattening it to 0.
+    'score': scoreOrNull,
     'confidence': confidence,
     'window_id': windowId,
     if (direction != null) 'direction': direction,

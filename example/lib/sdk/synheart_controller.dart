@@ -6,6 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synheart_core/synheart_core.dart';
 
+import 'mobile_host_runner.dart';
+
 /// The one place in this example that talks to the Synheart SDK.
 ///
 /// Every screen reads state from here and calls methods here — no screen
@@ -150,6 +152,28 @@ class SynheartController extends ChangeNotifier {
   int _hsiWindowCount = 0;
   StreamSubscription<HSIState>? _hsiSub;
 
+  /// The host-driven half of the mobile integration — the tick loop, rest
+  /// declaration, the three snapshots, the daily loop, and the simulated
+  /// cardiac stream.
+  ///
+  /// Split out rather than inlined here because it is *driving* rather than
+  /// configuring: this class ends at `startSession()`, and everything in
+  /// `MobileHostRunner` is what has to keep happening afterwards. Both halves
+  /// are still the only code in the example that touches the SDK, and this one
+  /// forwards the runner's notifications so a screen has a single listenable.
+  late final MobileHostRunner host = MobileHostRunner(
+    onChanged: notifyListeners,
+  );
+
+  /// Backgrounding is where §6 gets specific: `flush_pending` on the way out,
+  /// or up to one lateness budget's worth of completed windows is stranded
+  /// forever, and `drain then tick` on the way back in.
+  ///
+  /// Registered for the life of the controller rather than only while a
+  /// session runs, because the transition that matters most — the one where
+  /// iOS is about to stop scheduling this process — can arrive at any point.
+  AppLifecycleListener? _lifecycleListener;
+
   String? get subjectId => _subjectId;
   String? get deviceId => _deviceId;
   bool get isInitializing => _isInitializing;
@@ -170,11 +194,16 @@ class SynheartController extends ChangeNotifier {
 
   /// True when an enabled feature ALSO has its matching consent granted.
   ///
-  /// Both halves are required. This example enables wear, phone and behavior in
-  /// [buildConfig], so any one of the three consents pairs with something — but
-  /// an app that enables only `wearConfig` and is granted only `behavior` has
-  /// no working pair: wear is enabled but not permitted, behavior is permitted
-  /// but not enabled. Nothing would collect.
+  /// Both halves are required. An app that enables only `wearConfig` and is
+  /// granted only `behavior` has no working pair: wear is enabled but not
+  /// permitted, behavior is permitted but not enabled. Nothing would collect.
+  ///
+  /// This example enables wear and behavior, so either of those two consents
+  /// pairs with something. Phone context is a live demonstration of the
+  /// unpaired case: the consent exists and can be granted, but [buildConfig]
+  /// declares no `phoneConfig`, so granting it alone still collects nothing.
+  /// The phone clause below is kept rather than deleted for exactly that
+  /// reason — it is the half of the pair that is present.
   ///
   /// Deliberately NOT `hasAnyGrant`, which also counts cloudUpload, vendorSync,
   /// research and syni. Those govern what happens to data once collected; none
@@ -244,8 +273,60 @@ class SynheartController extends ChangeNotifier {
       // Declaring a module config both activates the feature and tells the SDK
       // which collectors to wire. Omit one and that module never starts.
       wearConfig: const WearConfig(),
-      phoneConfig: const PhoneConfig(),
-      behaviorConfig: const BehaviorConfig(),
+
+      // phoneConfig is deliberately NOT declared.
+      //
+      // Declaring it starts PhoneModule, whose four collectors are `Random()`
+      // generators: motion at 10 Hz, a 30% chance of flipping screen state
+      // every 30 s, a 40% chance of switching to a mock app every 15 s, and a
+      // 30% chance of inventing a notification every 20 s
+      // (`lib/src/modules/phone/phone_collectors.dart`). Cardiac is the only
+      // thing this example is allowed to simulate, and those four are not
+      // cardiac.
+      //
+      // It also contradicted the sensing roster: `MobileHostRunner` declares
+      // `screen_state: false` and `app_focus: false` because nothing real
+      // observes them, while the phone module was busy inventing exactly
+      // those two.
+      //
+      // The data never reached the runtime — `phone_module.dart` holds no
+      // bridge reference, so it wrote to an in-memory cache nothing reads —
+      // so nothing of value is lost by leaving it off. The module needs
+      // replacing with real platform collectors or deleting; until then, off
+      // is the honest setting.
+      behaviorConfig: const BehaviorConfig(
+        // §4.2 — without this the accel subscription is never created and
+        // `push_accel` is never called, so the kinematic modality has no
+        // input at all. It defaulted to false and no host was enabling it,
+        // which is why mobile motion was reaching nothing.
+        //
+        // It is necessary but not sufficient: the four kinematic heads also
+        // need a body-worn placement declared (§4.3, `setAccelPlacement`),
+        // and `unknown` — the default — withholds all of them.
+        emitRawMotionSamples: true,
+      ),
+
+      // §2 — the four declarations that change engine output. Off unless the
+      // Setup screen turns them on, because declaring `device_class`
+      // invalidates every persisted SRM baseline. See
+      // `MobileHostRunner.declareHostProfile`.
+      hostDeclarations: host.buildHostDeclarations(),
+
+      // §2.4 — the kinematic heads are opt-in and withhold until a placement
+      // is declared. Requested here so the Host screen can show them moving
+      // from "not requested" to "withheld, no placement" to a real reading,
+      // which are three different states a host has to be able to tell apart.
+      extraHeads: const [
+        ExtraHead.movementRegularity,
+        ExtraHead.posturalState,
+        ExtraHead.activityState,
+        ExtraHead.locomotionState,
+      ],
+
+      // Left at the runtime default (60 000). Stated explicitly because the
+      // rest detector's one-shot bookkeeping counts on the same grid — see
+      // `RestWindowDetector.windowMs`.
+      windowMs: 60000,
 
       // Required for the runtime consent-form flow: consentSubmitFormTyped
       // needs a non-empty deviceId + platform to stamp on the submission.
@@ -297,6 +378,38 @@ class SynheartController extends ChangeNotifier {
     );
   }
 
+  /// Turn the §2 host declarations on or off.
+  ///
+  /// Only meaningful before [initialize]: the config JSON is read once at
+  /// `synheart_core_new`, so flipping this afterwards changes nothing until
+  /// the SDK is shut down and rebuilt. The UI locks the toggle for exactly
+  /// that reason rather than letting it look effective and do nothing.
+  void setDeclareHostProfile(bool value) {
+    if (_isInitialized || host.declareHostProfile == value) return;
+    host.declareHostProfile = value;
+    notifyListeners();
+  }
+
+  /// Claim continuous sensing rather than letting `"auto"` resolve it.
+  void setClaimContinuousSensing(bool value) {
+    if (_isInitialized || host.claimContinuousSensing == value) return;
+    host.claimContinuousSensing = value;
+    notifyListeners();
+  }
+
+  /// The `device_class` this host stores its SRM snapshot under.
+  ///
+  /// Kept separate from the declaration itself, because the two answer
+  /// different questions. The runtime resolves `"auto"` to a class through its
+  /// own tables and rejects a cross-class SRM load with
+  /// `ERR_SRM_CONFIG_MISMATCH` — so the host needs a stable file key even
+  /// while it declares `"auto"`, and a phone and a tablet must not share one
+  /// or they take turns invalidating each other's baseline.
+  String get hostDeviceClass => switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.android => 'phone',
+    _ => 'desktop',
+  };
+
   /// Validate the config and load the native runtime.
   ///
   /// `autoStart: false` is deliberate — initializing must not begin collecting.
@@ -311,6 +424,29 @@ class SynheartController extends ChangeNotifier {
       if (_subjectId == null) await loadIdentity();
       await Synheart.initialize(config: buildConfig(), autoStart: false);
       _isInitialized = true;
+
+      // §7 — restore the three snapshots now, while there is still no
+      // Pipeline and therefore no window 1. `load_session_state` MUST run
+      // before the first tick: window 1 writes each head's state slot, so a
+      // restore attempted later is overwritten by a cold window and the
+      // context baseline has already counted a window against the wrong
+      // history. Doing it at initialize() rather than at startSession() is
+      // what makes that ordering unconditional.
+      await host.restore(
+        subjectId: _subjectId ?? '',
+        deviceClass: hostDeviceClass,
+      );
+
+      _lifecycleListener ??= AppLifecycleListener(
+        onPause: () => host.onBackgrounded(),
+        onRestart: host.onForegrounded,
+        // Last call before the process may be killed. `flush_pending` and the
+        // snapshot writes are best-effort here by nature — there is no
+        // guarantee of being scheduled again — which is exactly why the same
+        // work also runs on every pause and once per emitted window.
+        onDetach: () => host.onBackgrounded(),
+      );
+
       await refreshConsent();
     } on SynheartError catch (e) {
       // Configuration was rejected. The message names the field and the fix.
@@ -415,6 +551,10 @@ class SynheartController extends ChangeNotifier {
       _hsiSub ??= Synheart.onStateUpdate.listen((state) {
         _latestState = state;
         _hsiWindowCount++;
+        // §7 — export session state once per emitted window. Doing it only on
+        // background loses everything since the last one whenever the process
+        // is killed without a pause callback, which on Android is routine.
+        host.persistSessionState();
         notifyListeners();
       });
 
@@ -445,6 +585,13 @@ class SynheartController extends ChangeNotifier {
 
       _session = await Synheart.startSession();
       _isSessionRunning = Synheart.isSessionRunning;
+
+      // §6.1 — start the tick loop for the WHOLE session. `ingest_batch`
+      // advances the pipeline clock but `push_behavior` does not, so a
+      // session carrying interaction and no cardiac input emits zero HSI
+      // windows without this. Started after startSession() so the pipeline
+      // exists for the first tick to advance.
+      if (_isSessionRunning) host.start();
     } catch (e) {
       _sessionError = '$e';
     }
@@ -453,6 +600,10 @@ class SynheartController extends ChangeNotifier {
 
   Future<void> stopSession() async {
     if (!_isSessionRunning) return;
+    // Before `stopSession`, not after: `flush_pending` and the snapshot
+    // exports need a live handle, and the SRM export at session end is the
+    // one that stops baselines reporting `Warming` forever across launches.
+    await host.stop();
     try {
       await Synheart.stopSession();
     } catch (e) {
@@ -469,22 +620,36 @@ class SynheartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Real signal sources ────────────────────────────────────────────────
+  // ── Signal sources ─────────────────────────────────────────────────────
   //
-  // This example never fabricates biosignals. Synthetic heart rates would
-  // teach the wrong integration AND pollute real state: pushed samples feed the
-  // runtime's longitudinal baselines (SRM), so fake beats would corrupt the
-  // user's actual reference ranges on the device they ran the demo on.
-  //
-  // Signal arrives from the modules the config activated:
+  // Real signal arrives from the modules the config activated:
   //   wear      — HealthKit / Health Connect / BLE strap / watch companion
   //   phone     — device motion and context
   //   behavior  — taps and typing rhythm, via the gesture detector wrapper
   //
   // The SDK pushes those into the runtime itself. `Synheart.pushWearHr`,
   // `pushRr`, and `pushRrBatch` exist for hosts that own a source the SDK does
-  // not adapt — a proprietary strap, say — and should carry that source's real
-  // readings, never placeholders.
+  // not adapt — a proprietary strap, say.
+  //
+  // ── And a simulated one, behind a button ───────────────────────────────
+  //
+  // `host.startCardiacStream()` streams fabricated beats through that same
+  // path, because on a bare phone with no strap and no health permission it is
+  // the only way to see the cardiac ingest path work at all — and five axes
+  // sitting at zero confidence forever teaches a developer nothing about
+  // whether their integration is correct.
+  //
+  // Two things keep that from being a lie rather than a demo:
+  //
+  //  * It is tagged `default_sensor`, Tier-3, not `ble_hrm`. A synthetic
+  //    source does not get the Tier-1 routing a real chest strap earns.
+  //  * It is never automatic. The host has to ask, every session.
+  //
+  // The cost is real and unavoidable: those samples reach the SRM, which
+  // builds this person's longitudinal reference ranges on this device. So run
+  // it under a throwaway `subject_id` and use [wipeLocalData] afterwards. The
+  // Session screen says so where the button is, not in a comment nobody
+  // reading the UI will see.
 
   /// Live raw samples from the wear module, so the UI can show what is actually
   /// arriving rather than asserting that something is.
@@ -583,6 +748,14 @@ class SynheartController extends ChangeNotifier {
   /// probe every one of those symbols would go unexamined.
   Map<String, dynamic> get diagnostics =>
       Synheart.runtimeDiagnostics(probeAll: true);
+
+  /// Compile-time facts about the vendored runtime — crate versions, profile,
+  /// and the cargo features it was built with.
+  ///
+  /// The features list is the one to read when a context event is rejected:
+  /// without `app-context`, push_context_event is compiled as an inert stub
+  /// that returns 1, which is byte-identical to a rejected payload.
+  Map<String, dynamic>? get buildInfo => Synheart.buildInfo;
 
   /// SDK version constant, kept in sync with pubspec.
   String get sdkVersion => synheartCoreVersion;
@@ -731,6 +904,11 @@ class SynheartController extends ChangeNotifier {
   /// Erase every byte the SDK holds on this device.
   Future<void> wipeLocalData() async {
     await Synheart.wipeLocalData();
+    // The host's own snapshots are NOT runtime storage — they live in this
+    // app's preferences, so `Synheart.wipeLocalData()` does not touch them.
+    // Leaving them behind would restore the wiped baselines on the next
+    // launch, which makes the erasure look like it silently failed.
+    await host.clearSnapshots();
     _latestState = null;
     _hsiWindowCount = 0;
     await refreshConsent();
@@ -741,6 +919,8 @@ class SynheartController extends ChangeNotifier {
     _hsiSub?.cancel();
     _wearSub?.cancel();
     _behaviorSub?.cancel();
+    _lifecycleListener?.dispose();
+    host.dispose();
     super.dispose();
   }
 }
