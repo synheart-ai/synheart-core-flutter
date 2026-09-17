@@ -1550,9 +1550,8 @@ class Synheart {
         // Push raw 50 Hz accel batches to the Synheart Runtime so it can
         // derive features and the on-device motion classifier can run.
         //
-        // NOTE: the module converts m/s² → g at this boundary. The engine's
-        // `push_accel` takes g; `synheart_behavior` reports m/s². See
-        // `BehaviorModule`'s call site.
+        // Samples arrive in m/s² and the bridge converts to the engine's g
+        // convention once, at the FFI boundary; nothing converts before it.
         _behaviorModule!.pushAccelToRuntime =
             (int tsMs, double ax, double ay, double az) {
               _coreRuntime?.pushAccel(tsMs, ax, ay, az);
