@@ -16,13 +16,6 @@ import 'context_event_translator.dart';
 import 'native_event_translator.dart';
 import 'window_aggregator.dart';
 
-/// Standard gravity in m/s².
-///
-/// `synheart_behavior` reports accelerometer samples in m/s² (gravity
-/// included); the engine's `push_accel` takes **g**. This is the conversion
-/// between them, and it must not be "simplified away" — see the call site.
-const double _standardGravityMs2 = 9.80665;
-
 /// Behavior Module
 ///
 /// Captures user-device interaction patterns using synheart_behavior package.
@@ -489,29 +482,12 @@ class BehaviorModule extends BaseSynheartModule
               final push = _pushAccelToRuntime;
               if (push == null) return;
               for (final s in samples) {
-                // Unit conversion, and it is not cosmetic. `MotionSample` is
-                // documented as m/s² with gravity included (Android's raw
-                // `TYPE_ACCELEROMETER`), whereas the engine's `push_accel`
-                // takes **g** and multiplies by `G` internally to store m/s².
-                // Forwarded raw, a phone at rest reported ~9.81 and the engine
-                // stored ~96 m/s² — every magnitude-based cut-point in
-                // `activity_state` and `locomotion_state` was ~9.8x off, the
-                // RulePack still-gate never saw stillness (so no personal
-                // physiological baseline could ever accumulate), and any host
-                // reading `meta.synheart.motion.accel_rms` back out for its own
-                // rest detection never satisfied a low-motion clause.
-                //
-                // It cleared the runtime's own ±50 sanity gate because that
-                // gate runs on the pre-multiply value. `synheart-wear-rust`
-                // converts explicitly for the same reason (Polar reports
-                // milli-g, it divides by 1000) — g is the engine's contract
-                // across the whole ecosystem, not a Flutter-side choice.
-                push(
-                  s.tsMs,
-                  s.ax / _standardGravityMs2,
-                  s.ay / _standardGravityMs2,
-                  s.az / _standardGravityMs2,
-                );
+                // `MotionSample` is m/s² with gravity included, and so is the
+                // runtime bridge's accelerometer contract: the bridge converts
+                // to the engine's g convention once, at the FFI boundary.
+                // Converting here as well shrank every phone motion sample by
+                // a further factor of 9.8 and the motion features dropped out.
+                push(s.tsMs, s.ax, s.ay, s.az);
               }
             },
             onError: (e, st) => SynheartLogger.log(
