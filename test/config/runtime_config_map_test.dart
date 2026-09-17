@@ -142,4 +142,30 @@ void main() {
       expect((map['privacy'] as Map)['allow_research'], isTrue);
     });
   });
+
+  group('research switches', () {
+    test('both are absent by default — the runtime default stands', () {
+      final map = buildRuntimeConfigMap(SynheartConfig(appId: 'a'));
+      expect(map.containsKey('emit_diagnostics'), isFalse);
+      expect(map.containsKey('research_baseline'), isFalse);
+    });
+
+    test('emitDiagnostics sends the key the engine reads', () {
+      // This is the switch that turns an export a reviewer can audit into one
+      // they can only take on trust — see SynheartConfig.emitDiagnostics.
+      final map = buildRuntimeConfigMap(
+        SynheartConfig(appId: 'a', emitDiagnostics: true),
+      );
+      expect(map['emit_diagnostics'], isTrue);
+    });
+
+    test('researchBaseline sends d_min=1 without implying research mode', () {
+      final config = SynheartConfig(appId: 'a', researchBaseline: true);
+      final map = buildRuntimeConfigMap(config);
+      expect(map['research_baseline'], isTrue);
+      // Deliberately NOT research mode: that would also cap step_ms and open a
+      // lab session the host may already be managing itself.
+      expect(map['mode'], SynheartMode.personal.name);
+    });
+  });
 }

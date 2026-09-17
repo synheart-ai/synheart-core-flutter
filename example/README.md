@@ -113,6 +113,7 @@ lib/
   main.dart                     app shell, tab navigation
   sdk/
     synheart_controller.dart    THE ONLY FILE THAT CALLS THE SDK
+    axis_coverage.dart          all 18 canonical axes: present / withheld / absent
   screens/
     setup_screen.dart           config + initialize
     consent_screen.dart         runtime editable-form consent flow
@@ -145,3 +146,12 @@ methods, so the whole integration is one readable file.
   optional native symbols the loaded runtime exports. Optional bindings resolve
   lazily, so a screen that just reads `missingSymbols` looks healthy while
   having checked nothing.
+- **Full axis coverage** — the Session screen rolls call every one of the 18
+  canonical HSI 1.3 members, not just the eight with typed accessors, and sorts
+  them into three states that must never be collapsed: **present** (the engine
+  emitted a reading, possibly a measured zero, which is a real claim),
+  **withheld** (computed and deliberately not published, with the engine's own
+  reason printed verbatim), and **absent** (in neither `axes[]` nor
+  `state_withheld` — no head ran, or this build has none). A reading published
+  at zero confidence is marked separately, because on screen it is
+  indistinguishable from a low score and no display threshold rescues it.
