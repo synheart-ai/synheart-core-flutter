@@ -200,6 +200,7 @@ export 'src/modules/cloud/cloud_exceptions.dart';
 // Most apps shouldn't reach for this directly; subscribe to
 // `Synheart.onHSIUpdate` / `onStateUpdate` instead.
 export 'src/core_runtime/core_runtime_bridge.dart';
+export 'src/core_runtime/runtime_compat.dart';
 
 // FFI loader — needed by apps that wire optional engines (e.g.
 // `SynheartResilience(ffi: SynheartCoreFFI.load())`).

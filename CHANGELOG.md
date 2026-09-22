@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — runtime version gate
+
+- **The SDK now states which runtime its bindings assume and checks it at
+  init.** `RuntimeCompat.writtenAgainst` (`0.31.1`) and `RuntimeCompat.minimum`
+  (`0.20.0`) are compared against `build_info.core_runtime` when the bridge
+  loads; the result is logged and exposed as `Synheart.runtimeCompatibility`.
+  Below the minimum, `initialize` refuses with a `StateError` naming the fix
+  (`synheart install runtime`); between minimum and written-against it warns
+  once. Until now nothing in this package recorded the runtime version the
+  hand-written C ABI surface was written for, so every behavioural change in
+  the runtime's `SDK-CONTRACT-CHANGES.md` was invisible to a consumer.
+
+### Fixed — hot-restart abort with an active session (runtime ≥ 0.31.1)
+
+- **HSI delivery is now buffered (pull-based) when the runtime supports it.**
+  A Flutter hot restart destroys the Dart isolate and its `NativeCallable`s,
+  but the native runtime, its tokio workers and the HSI listener survive in
+  the process; the next completed window was dispatched through a dangling
+  pointer and aborted the app (`Callback invoked after it has been deleted`).
+  Continuous background sensing keeps sessions active across the restart, so
+  on Android this reproduced on every restart mid-session. On a runtime
+  ≥ 0.31.1 the bridge now calls `synheart_core_init_hsi_buffered` instead of
+  registering a callback and drains `synheart_core_drain_hsi` on a 1 s pump
+  (`CoreRuntimeBridge.hsiDrainInterval`; ring `hsiBufferCapacity`, default
+  64 — the oldest frame is evicted when full). `Synheart.tick` / `tickAll`
+  drain in the same turn, so a host that ticks itself sees no added latency;
+  delivery stays deduplicated by `hsi_id`. Older runtimes fall back to the
+  push callback unchanged. `Synheart.isHsiDeliveryBuffered` and
+  `Synheart.droppedHsiFrames` expose the mode and the runtime's eviction
+  counter. Same pattern as the buffered logging path.
+- **Stream callback teardown uses `synheart_core_clear_stream_callback`**
+  when exported (≥ 0.31.1) and closes the trampoline immediately; older
+  runtimes keep the retire-until-`coreFree` path. The stream callback itself
+  is still a pushed function pointer — 0.31.1 adds clear-only, no buffered
+  mode — so a hot restart during an active RAMEN stream remains exposed.
+
+### Added — research instance fan-in
+
+- **`SynheartInstance` can now be given an app identity and keystroke
+  context.** `pushAppForeground`, `pushContextEvent`, `pushContextEventJson`
+  and `supportsRichBehaviorEvents` are the per-instance equivalents of the
+  static `Synheart.*` calls, which reach the personal runtime only. A host
+  running a second (research) instance had no way to feed either, so every
+  research window resolved to the `Unknown` app category — an all-zero
+  interpretation-mask row — and carried `context_label: UK` with no evidence
+  behind it, starving CFI / Cognitive Load's digital term, Valence's friction
+  index and the behaviour-only Stress path on every research row. No new
+  native calls: both route through the existing bridge symbols.
+
 ### Fixed — data correctness
 
 - **Accelerometer samples were pushed in m/s² into an API that takes g**, so
