@@ -5,6 +5,7 @@ import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
 import 'config/runtime_config_map.dart';
 import 'config/synheart_config.dart';
 import 'models/behavior_event_input.dart';
+import 'models/context_event_input.dart';
 import 'modules/behavior/behavior_code.dart';
 import 'modules/cloud/device_auth_provider.dart';
 import 'core/logger.dart';
@@ -296,6 +297,52 @@ class SynheartInstance {
   int? pushBehaviorEvent(BehaviorEventInput event) => _disposed
       ? null
       : _bridge.pushBehaviorEventJson(jsonEncode(event.toJson()));
+
+  /// Whether the loaded runtime takes rich behavior events on this instance.
+  /// Same probe the static [Synheart.supportsRichBehaviorEvents] runs for the
+  /// personal runtime. Both instances load one native library, but a host
+  /// feeding two handles should ask the handle it is about to feed.
+  bool get supportsRichBehaviorEvents =>
+      !_disposed && _bridge.supportsRichBehaviorEvents;
+
+  // ── Context fan-in (app identity + keystroke context during a lab window) ─
+  //
+  // The static `Synheart.pushAppForeground` / `Synheart.pushContextEvent`
+  // reach the PERSONAL runtime only. A host running a second, research
+  // instance had no way to give it an app identity or context evidence, so
+  // every research window resolved to the `Unknown` app category (an all-zero
+  // interpretation-mask row) and carried `context_label: UK` with no evidence
+  // behind it. These are the per-instance equivalents.
+
+  /// Declare which application is in the foreground for THIS instance.
+  ///
+  /// Same contract as the static call: send at session start, on every
+  /// foreground change, and on a slow heartbeat — repeats are steady-state
+  /// observations, not switches. [app] is an Android package name or iOS
+  /// bundle id. Returns the runtime status (`0` = accepted), or `null` when
+  /// this instance is disposed or the runtime lacks `push_behavior_event`.
+  int? pushAppForeground(String app, {int? tsMs}) => pushBehaviorEvent(
+    BehaviorEventInput.appForeground(
+      tsMs ?? DateTime.now().millisecondsSinceEpoch,
+      app,
+    ),
+  );
+
+  /// Push one privacy-preserving context event into this instance — the only
+  /// source of `context.deviation.*`, and therefore of CFI. Mirrors the static
+  /// [Synheart.pushContextEvent]; see it for the send-both-directions rule.
+  ///
+  /// Returns `0` on acceptance, `null` when this instance is disposed or the
+  /// runtime does not export the symbol, and a non-zero status most often when
+  /// the runtime was built without the `app-context` feature.
+  int? pushContextEvent(ContextEventInput event) => _disposed
+      ? null
+      : _bridge.pushContextEventJson(jsonEncode(event.toJson()));
+
+  /// Raw-payload escape hatch for [pushContextEvent]; the static
+  /// [Synheart.pushContextEventJson] explains when to prefer the typed call.
+  int? pushContextEventJson(Map<String, dynamic> event) =>
+      _disposed ? null : _bridge.pushContextEventJson(jsonEncode(event));
 
   /// Declare the window containing [tsMs] to be a rest window. One-shot: call
   /// once per rest window, not once when a break begins.
