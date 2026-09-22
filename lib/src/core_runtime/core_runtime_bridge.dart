@@ -2657,12 +2657,27 @@ class CoreRuntimeBridge {
 
   /// Unregister the stream callback.
   ///
-  /// Retires the trampoline rather than closing it — see [_retiredCallables].
+  /// On a runtime ≥ 0.31.1 `synheart_core_clear_stream_callback` returns only
+  /// once the callback can no longer be invoked, so the trampoline is closed
+  /// on the spot. Older runtimes have no clear entrypoint (the listener holds
+  /// the callback by value), so the trampoline is retired until `coreFree` —
+  /// see [_retiredCallables]. Never call this from inside the stream callback
+  /// itself: the runtime waits for the in-flight dispatch and deadlocks.
   void clearStreamCallback() {
-    if (_streamCallable != null) {
-      _retiredCallables.add(_streamCallable!);
-      _streamCallable = null;
+    final callable = _streamCallable;
+    if (callable == null) return;
+    _streamCallable = null;
+    final clear = _ffi.clearStreamCallback;
+    if (clear != null) {
+      try {
+        clear(_handle);
+        callable.close();
+        return;
+      } catch (_) {
+        // Fall through to the retire path; closing later is always safe.
+      }
     }
+    _retiredCallables.add(callable);
   }
 
   /// Get the current stream connection state.
@@ -2672,14 +2687,62 @@ class CoreRuntimeBridge {
 
   NativeCallable<Void Function(Pointer<Utf8>, Pointer<Void>)>? _hsiCallable;
 
+  /// True while HSI reaches Dart through the runtime's ring buffer
+  /// (`synheart_core_init_hsi_buffered` + `synheart_core_drain_hsi`, runtime
+  /// ≥ 0.31.1) instead of a `NativeCallable`.
+  ///
+  /// Same crash class the buffered logging path removed: a Flutter hot restart
+  /// destroys the isolate and its callables, while the native runtime, its
+  /// tokio workers and the HSI listener survive in the same process. The next
+  /// window to complete is dispatched through a pointer to a callable that no
+  /// longer exists — `Callback invoked after it has been deleted`. Continuous
+  /// background sensing keeps sessions active across the restart window, which
+  /// is what made it reproducible on Android. In buffered mode no function
+  /// pointer ever crosses FFI: the runtime buffers, this isolate polls.
+  bool _hsiBufferedMode = false;
+  Timer? _hsiDrainTimer;
+  void Function(String hsiJson)? _hsiSink;
+  int _lastReportedDroppedHsi = 0;
+
+  /// Ring capacity handed to `init_hsi_buffered`. Frames arrive at ~1 Hz
+  /// during an active session and the **oldest** is evicted when the ring is
+  /// full, so size it for the worst gap between drains the host expects, not
+  /// for typical operation. 64 covers a minute with nobody polling.
+  static int hsiBufferCapacity = 64;
+
+  /// Drain cadence in buffered mode. Frames are ~1 Hz, so polling faster buys
+  /// nothing; slower adds that much latency to `onStateUpdate`. A host that
+  /// ticks the engine itself gets its frames in the same turn regardless —
+  /// see [drainHsi].
+  static Duration hsiDrainInterval = const Duration(seconds: 1);
+
+  /// Whether the loaded runtime exports the buffered HSI delivery symbols.
+  bool get supportsBufferedHsi =>
+      _ffi.initHsiBuffered != null && _ffi.drainHsi != null;
+
+  /// Whether HSI is currently delivered by polling rather than by callback.
+  bool get isHsiBuffered => _hsiBufferedMode;
+
   /// Register a callback for real-time HSI state updates.
   ///
   /// The [onHsi] function is called on each HSI frame (typically 1Hz during
   /// an active session) with the raw JSON string.
   ///
-  /// Only one callback can be active. Call [clearHsiCallback] to unregister.
-  void setHsiCallback(void Function(String hsiJson) onHsi) {
+  /// Only one delivery path can be active. Call [clearHsiCallback] to
+  /// unregister.
+  ///
+  /// Prefers **buffered (pull-based) delivery** when the runtime supports it
+  /// (≥ 0.31.1): `init_hsi_buffered` retires any native callback, waits for an
+  /// in-flight dispatch, and from then on the runtime queues frames in a ring
+  /// this bridge drains on [hsiDrainInterval]. Falls back to the legacy push
+  /// callback on an older runtime — same behaviour as before, including its
+  /// hot-restart crash exposure, until the vendored library is updated.
+  void setHsiCallback(
+    void Function(String hsiJson) onHsi, {
+    bool preferBuffered = true,
+  }) {
     clearHsiCallback();
+    if (preferBuffered && _initHsiBuffered(onHsi)) return;
 
     void nativeCallback(Pointer<Utf8> jsonPtr, Pointer<Void> _) {
       if (jsonPtr == nullptr) return;
@@ -2694,16 +2757,113 @@ class CoreRuntimeBridge {
     _ffi.setHsiCallback(_handle, _hsiCallable!.nativeFunction, nullptr);
   }
 
-  /// Unregister the HSI callback.
+  /// Unregister HSI delivery.
   ///
-  /// Tells the runtime to stop dispatching, then retires the trampoline rather
-  /// than closing it — see [_retiredCallables].
+  /// Buffered mode: one final drain so a window completed since the last poll
+  /// is not lost, then stop polling — nothing to join, no trampoline was ever
+  /// registered. Push mode: tells the runtime to stop dispatching, then retires
+  /// the trampoline rather than closing it — see [_retiredCallables].
   void clearHsiCallback() {
+    if (_hsiBufferedMode) {
+      try {
+        drainHsi();
+      } catch (_) {
+        // Best-effort final flush.
+      }
+      _hsiDrainTimer?.cancel();
+      _hsiDrainTimer = null;
+      _hsiBufferedMode = false;
+      _hsiSink = null;
+    }
     if (_hsiCallable != null) {
       _ffi.clearHsiCallback(_handle);
       _retiredCallables.add(_hsiCallable!);
       _hsiCallable = null;
     }
+  }
+
+  /// Switch the runtime to buffered delivery and start the drain pump.
+  /// Returns false — with nothing changed — when the runtime lacks the
+  /// symbols or refuses, so the caller can fall back to the push path.
+  bool _initHsiBuffered(void Function(String hsiJson) onHsi) {
+    if (_disposed) return false;
+    final init = _ffi.initHsiBuffered;
+    if (init == null || _ffi.drainHsi == null) return false;
+    final int rc;
+    try {
+      rc = init(_handle, hsiBufferCapacity);
+    } catch (_) {
+      return false;
+    }
+    if (rc != 0) return false;
+    _hsiBufferedMode = true;
+    _hsiSink = onHsi;
+    _lastReportedDroppedHsi = 0; // the runtime resets its counter on init
+    _hsiDrainTimer?.cancel();
+    _hsiDrainTimer = Timer.periodic(hsiDrainInterval, (_) => drainHsi());
+    return true;
+  }
+
+  /// Deliver every frame pending in the runtime's ring to the registered
+  /// sink, oldest first. No-op outside buffered mode.
+  ///
+  /// Safe — and cheap — to call from the host's own tick loop as well as from
+  /// the periodic pump: an empty ring returns NULL (never an empty array) and
+  /// costs one FFI call. Frames a host already received as a `tick` /
+  /// `tick_all` return value are deduplicated downstream by `hsi_id`.
+  void drainHsi() {
+    if (!_hsiBufferedMode || _disposed) return;
+    final sink = _hsiSink;
+    final drain = _ffi.drainHsi;
+    if (sink == null || drain == null) return;
+    Pointer<Utf8> ptr;
+    try {
+      ptr = drain(_handle);
+    } catch (_) {
+      return;
+    }
+    if (ptr == nullptr) return; // nothing pending — the normal idle case
+    final blob = _readFfiStringAndFree(ptr, _ffi.coreFreeString);
+    if (blob == null || blob.isEmpty) return;
+    final List<dynamic> frames;
+    try {
+      final decoded = jsonDecode(blob);
+      if (decoded is! List) return;
+      frames = decoded;
+    } catch (_) {
+      return;
+    }
+    for (final frame in frames) {
+      // The delivery path is string-based end to end (the deduper reads
+      // `meta.ids.hsi_id` off the raw text and `HSIState` keeps `rawJson`),
+      // so hand each element on as its own JSON document.
+      sink(jsonEncode(frame));
+    }
+    _reportDroppedHsiIfChanged();
+  }
+
+  /// Frames the runtime evicted from the ring (or lost to channel lag) since
+  /// buffered mode was last initialised. Always `0` while something drains
+  /// at least every [hsiBufferCapacity] frames; anything else is a gap in the
+  /// host's drain loop, not back-pressure to tune.
+  int droppedHsiFrames() {
+    final f = _ffi.droppedHsiFrames;
+    if (f == null || _disposed) return 0;
+    try {
+      return f(_handle);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  void _reportDroppedHsiIfChanged() {
+    final dropped = droppedHsiFrames();
+    if (dropped == _lastReportedDroppedHsi) return;
+    _lastReportedDroppedHsi = dropped;
+    SynheartLogger.log(
+      '[Synheart] HSI ring has dropped $dropped frame(s) in total — nothing '
+      'drained for longer than hsiBufferCapacity ($hsiBufferCapacity) frames.',
+    );
   }
 
   // ── Lab ──────────────────────────────────────────────────────────────

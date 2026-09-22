@@ -49,6 +49,7 @@ import 'config/synheart_feature.dart';
 import 'config/activation_manager.dart';
 import 'modules/cloud/device_auth_provider.dart';
 import 'core_runtime/core_runtime_bridge.dart';
+import 'core_runtime/runtime_compat.dart';
 import 'core_runtime/ffi_bindings.dart' show SynheartCoreFFI;
 import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
 import 'sync/sync_readiness.dart';
@@ -1346,6 +1347,16 @@ class Synheart {
       }
       if (_coreRuntime != null) {
         SynheartLogger.log('[Synheart] core runtime bridge loaded');
+        // Version gate. The C ABI is additive, so an old vendored library
+        // links fine and diverges silently; this is where it becomes visible.
+        final compat = RuntimeCompat.check(CoreRuntimeBridge.buildInfo());
+        runtimeCompatibility = compat;
+        SynheartLogger.log(compat.message);
+        if (!compat.isAcceptable) {
+          _coreRuntime?.dispose();
+          _coreRuntime = null;
+          throw StateError(compat.message);
+        }
         // Capture the canonical subject the runtime resolved (device-auth
         // derive may have changed it) so Dart-side subject checks match native.
         _syncSubjectFromNative();
@@ -1593,6 +1604,15 @@ class Synheart {
         // Consent gate + fan-out live in [_deliverHsiWindow], shared with the
         // per-event push path so both producers behave identically.
         _coreRuntime!.setHsiCallback(_deliverHsiWindow);
+        SynheartLogger.log(
+          _coreRuntime!.isHsiBuffered
+              ? '[Synheart] HSI delivery: buffered '
+                    '(ring ${CoreRuntimeBridge.hsiBufferCapacity}, drain '
+                    '${CoreRuntimeBridge.hsiDrainInterval.inMilliseconds} ms)'
+              : '[Synheart] HSI delivery: push callback — runtime predates '
+                    '0.31.1 buffered delivery; hot-restart crash exposure '
+                    'remains until the vendored runtime is updated.',
+        );
       }
 
       _activationManager = ActivationManager();
@@ -3121,6 +3141,10 @@ class Synheart {
   /// parse the return value to keep the documented streams alive.
   static String? tickAll(int nowMs) {
     final json = _coreRuntime?.tickAll(nowMs);
+    // In buffered mode the runtime queued these same windows for the drain
+    // pump; take them now so they reach the streams in this turn rather than
+    // up to a drain interval later (deduplicated by `hsi_id` either way).
+    _coreRuntime?.drainHsi();
     _deliverHsiArray(json);
     return json;
   }
@@ -3565,6 +3589,7 @@ class Synheart {
   /// pattern for mobile — this is exposed for watch engine / advanced use.
   static String? tick(int nowMs) {
     final hsi = _coreRuntime?.tick(nowMs);
+    _coreRuntime?.drainHsi(); // see [tickAll]
     // Same reason [tickAll] delivers: a host-driven tick is the only clock a
     // behavior-only session has, and its window would otherwise never reach
     // the documented streams. Deduplicated by `hsi_id`, so this is safe
@@ -5603,6 +5628,22 @@ class Synheart {
   /// All synheart crate versions, target, profile, and enabled features.
   /// No active session needed — compile-time info baked into the .so/.a.
   static Map<String, dynamic>? get buildInfo => CoreRuntimeBridge.buildInfo();
+
+  /// Result of the runtime version gate run at initialisation: the loaded
+  /// runtime's version against [RuntimeCompat.writtenAgainst] /
+  /// [RuntimeCompat.minimum]. Null before initialisation.
+  static RuntimeCompatResult? runtimeCompatibility;
+
+  /// True when HSI frames are delivered by polling the runtime's ring buffer
+  /// (runtime ≥ 0.31.1) rather than through a native callback. Buffered
+  /// delivery is what makes a Flutter hot restart safe while a session is
+  /// active; see `CoreRuntimeBridge.setHsiCallback`.
+  static bool get isHsiDeliveryBuffered => _coreRuntime?.isHsiBuffered ?? false;
+
+  /// Frames evicted from the HSI ring since buffered delivery was initialised.
+  /// `0` unless the host stopped draining for longer than the ring holds; log
+  /// it beside your frame count for field visibility.
+  static int get droppedHsiFrames => _coreRuntime?.droppedHsiFrames() ?? 0;
 
   /// Get module statuses (for debugging)
   Map<String, String> getModuleStatuses() {
