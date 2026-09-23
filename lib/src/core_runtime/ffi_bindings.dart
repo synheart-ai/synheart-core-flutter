@@ -1630,6 +1630,40 @@ class SynheartCoreFFI {
         void Function(Pointer<Void>)
       >('synheart_core_clear_hsi_callback');
 
+  // Buffered (pull-based) HSI delivery — runtime ≥ 0.31.1. Optional: a
+  // runtime that predates them keeps the push-callback path.
+  //
+  //   init_hsi_buffered(handle, capacity: c_int) -> c_int   0 ok, 1 null handle
+  //   drain_hsi(handle) -> *mut c_char                      JSON array, oldest
+  //                                                         first; NULL when
+  //                                                         nothing pending
+  //   dropped_hsi_frames(handle) -> u64                     monotonic; reset by
+  //                                                         init_hsi_buffered
+  late final int Function(Pointer<Void>, int)? initHsiBuffered = _optional(
+    'synheart_core_init_hsi_buffered',
+    () =>
+        _lib.lookupFunction<
+          Int32 Function(Pointer<Void>, Int32),
+          int Function(Pointer<Void>, int)
+        >('synheart_core_init_hsi_buffered'),
+  );
+  late final Pointer<Utf8> Function(Pointer<Void>)? drainHsi = _optional(
+    'synheart_core_drain_hsi',
+    () =>
+        _lib.lookupFunction<
+          Pointer<Utf8> Function(Pointer<Void>),
+          Pointer<Utf8> Function(Pointer<Void>)
+        >('synheart_core_drain_hsi'),
+  );
+  late final int Function(Pointer<Void>)? droppedHsiFrames = _optional(
+    'synheart_core_dropped_hsi_frames',
+    () =>
+        _lib.lookupFunction<
+          Uint64 Function(Pointer<Void>),
+          int Function(Pointer<Void>)
+        >('synheart_core_dropped_hsi_frames'),
+  );
+
   // Stream (RAMEN vendor sync)
   late final streamStart = _lib
       .lookupFunction<
@@ -1656,6 +1690,19 @@ class SynheartCoreFFI {
           Pointer<Void>,
         )
       >('synheart_core_set_stream_callback');
+
+  /// Runtime ≥ 0.31.1. Returns only once the stream callback can no longer be
+  /// invoked, so the trampoline may be closed immediately afterwards. Absent
+  /// on older runtimes, where the trampoline must instead be retired until
+  /// `synheart_core_free` (see CoreRuntimeBridge._retiredCallables).
+  late final void Function(Pointer<Void>)? clearStreamCallback = _optional(
+    'synheart_core_clear_stream_callback',
+    () =>
+        _lib.lookupFunction<
+          Void Function(Pointer<Void>),
+          void Function(Pointer<Void>)
+        >('synheart_core_clear_stream_callback'),
+  );
 
   late final streamState = _lib
       .lookupFunction<
