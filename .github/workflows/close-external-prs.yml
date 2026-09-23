@@ -136,15 +136,15 @@ jobs:
             core.info(`Closing PR #${pr.number} from external author @${login} (association=${association})`);
 
             const body = [
-              "Hi @" + context.payload.pull_request.user.login + ", thanks for your interest in Synheart.",
+              "**This PR will be auto-closed**",
               "",
-              "This repository is **source-available** and we do **not accept external pull requests** at this time.",
-              "Synheart SDKs are developed privately and mirrored here for source-available distribution.",
+              "This is a source-available repository. Pull requests from outside the Synheart team are closed automatically.",
               "",
-              "If you found a bug or want to request a feature, please [open an issue](../../issues/new/choose) — that is the supported way to influence the SDK.",
-              "For the rationale, see [CONTRIBUTING.md](../blob/HEAD/CONTRIBUTING.md). For security reports, see [SECURITY.md](../blob/HEAD/SECURITY.md).",
+              "For bugs or feature requests, please [open an issue](../../issues/new/choose).",
+              "For security issues, see [SECURITY.md](../blob/HEAD/SECURITY.md).",
+              "For the rationale behind this policy, see [CONTRIBUTING.md](../blob/HEAD/CONTRIBUTING.md).",
               "",
-              "We are closing this PR automatically. Thanks again for taking the time to look at the code.",
+              "Thank you for your interest in Synheart.",
             ].join("\n");
 
             await github.rest.issues.createComment({
