@@ -6,4 +6,4 @@
 /// Kept in sync with the `version:` field in pubspec.yaml. Surfaced so host
 /// apps can display the SDK version in About / diagnostics screens without
 /// having to ship the lock file as an asset.
-const String synheartCoreVersion = '0.14.0';
+const String synheartCoreVersion = '0.15.0';
