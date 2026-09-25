@@ -39,8 +39,10 @@ import '../../models/behavior_event_input.dart';
 /// twice, inflating the notification rate, Interruption Pressure and the lab
 /// summary. The caller skips the runtime push for these.
 ///
-/// Calls are not covered: the collector labels a call's arrival `ignored`
-/// too, so it cannot be told apart from its follow-up here.
+/// Calls never have one: both platforms' collectors emit a single call event,
+/// at its outcome (`answered` or `ignored`), so every call event is the call.
+/// (Android's emitted on ringing as well until synheart_behavior's
+/// one-event-per-call fix.)
 bool isNotificationFollowUp(sb.BehaviorEvent event) {
   if (event.eventType != sb.BehaviorEventType.notification) return false;
   final action = event.metrics['action'];

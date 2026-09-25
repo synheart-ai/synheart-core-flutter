@@ -201,7 +201,7 @@ void main() {
       expect(isNotificationFollowUp(notif('opened')), isTrue);
     });
 
-    test('calls are left alone: their arrival is labelled ignored too', () {
+    test('a call event is the call, whatever its action', () {
       expect(
         isNotificationFollowUp(
           native(sb.BehaviorEventType.call, {'action': 'ignored'}),
