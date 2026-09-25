@@ -27,7 +27,7 @@ dependencies:
   # workout/provider surface is unchanged. Kept below 0.6.0 to guard against a
   # future breaking major.
   synheart_wear: ">=0.4.0 <0.6.0"
-  synheart_session: ^0.2.0
+  synheart_session: ^0.3.0
   synheart_behavior: ^0.4.0
   synheart_auth: ^0.1.7
 

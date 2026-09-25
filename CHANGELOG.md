@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`synheart_session` constraint `^0.2.0` → `^0.3.0`.** Picks up the
+  Android watch-relay fix: the relay no longer receives watch messages
+  while no session runs. 0.3.0 is a minor bump because it adds
+  `SessionMode.typing`; an app with an exhaustive `switch` over
+  `SessionMode` must handle the new value.
+
 ## [0.14.0] - 2026-09-23
 
 ### Added — runtime version gate
