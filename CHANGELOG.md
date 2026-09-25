@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — per-instance HSI delivery
+
+- **`SynheartInstance` can now receive every HSI window it completes.**
+  `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are
+  the per-instance equivalent of the static `Synheart.onHSIUpdate`, which
+  reaches the personal runtime only. A host reading a second instance's
+  output had `tick()`'s return value alone — but `startSession` also starts
+  the runtime's own 1 s background tick loop on the same pipeline, and a
+  window that loop closes first never comes back from `tick()`. Those
+  windows were still emitted (and uploaded), just unreachable from Dart.
+  The listener subscribes to the engine's broadcast, so it sees windows from
+  both paths; a host that also reads `tick()` deduplicates. Buffered
+  delivery on runtime ≥ 0.31.1, push callback on older runtimes. No new
+  native calls: the bridge was already per-handle.
+
 ## [0.14.0] - 2026-09-23
 
 ### Added — runtime version gate
