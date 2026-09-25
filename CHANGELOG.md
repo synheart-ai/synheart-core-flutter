@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-25
+
 ### Added — per-instance HSI delivery
 
 - **`SynheartInstance` can now receive every HSI window it completes.**
@@ -21,6 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both paths; a host that also reads `tick()` deduplicates. Buffered
   delivery on runtime ≥ 0.31.1, push callback on older runtimes. No new
   native calls: the bridge was already per-handle.
+
+### Added — host notification support
+
+- **`Synheart.runtimeBehaviorEventStream`.** Every native behavior event in
+  the rich form the personal runtime receives it (notification `action` and
+  `source_app`, scroll direction, tap duration), so a host feeding a second
+  `SynheartInstance`, which has no collectors, can forward what it needs
+  with `pushBehaviorEvent`. A facade-level broadcast: one subscription
+  outlives the behavior module being rebuilt.
+- **`HostDeclarations.notificationsObservable`** sends
+  `notifications_observable` (runtime ≥ 0.32.0). Absent, the runtime
+  resolves it to `true` on Android and desktop, so a host without a running
+  notification listener must declare `false`. Older runtimes ignore it.
+
+### Fixed — notification follow-ups counted as arrivals
+
+- **A notification's later outcome no longer reaches the runtime as a new
+  arrival.** Android's collector reports a notification on arrival
+  (`received`) and again with its outcome (`ignored` after 30 s, or
+  `opened`); the engine counts every notification event as an arrival, so
+  an ignored notification counted twice, inflating the notification rate,
+  Interruption Pressure and the lab `notification_count`. Follow-ups
+  (`isNotificationFollowUp`) are no longer pushed to the runtime; the public
+  `behaviorEventStream` still carries them. Calls need no filter: both
+  platforms emit one call event, at its outcome (synheart_behavior ≥ 0.4.1).
+
+### Changed
+- **`synheart_session` constraint `^0.2.0` → `^0.3.0`.** Picks up the
+  Android watch-relay fix: the relay no longer receives watch messages
+  while no session runs. 0.3.0 is a minor bump because it adds
+  `SessionMode.typing`; an app with an exhaustive `switch` over
+  `SessionMode` must handle the new value.
 
 ## [0.14.0] - 2026-09-23
 
@@ -943,7 +977,8 @@ breaking change to `processVendorEvent`.
   `synheart_behavior ^0.3.0`, `synheart_auth ^0.1.1`) instead of git
   refs.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.14.0...v0.15.0
 [0.12.0]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.12.0
 [0.11.1]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.11.1
 [0.11.0]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.11.0
