@@ -1549,6 +1549,11 @@ class Synheart {
         // event on an older runtime instead of degrading to the legacy path.
         _behaviorModule!.pushBehaviorEventToRuntime = (event) =>
             _coreRuntime?.pushBehaviorEventJson(jsonEncode(event.toJson()));
+        _behaviorModule!.onRuntimeBehaviorEvent = (event) {
+          if (!_runtimeBehaviorEvents.isClosed) {
+            _runtimeBehaviorEvents.add(event);
+          }
+        };
         // The context-evidence channel, additional to the behaviour channel
         // above rather than an alternative to it. Different runtime buffer,
         // different consumer: this one feeds the person-relative context
@@ -2194,6 +2199,22 @@ class Synheart {
   /// print('Event: ${event.type} at ${event.timestamp}');
   /// });
   /// ```
+  /// Every native behavior event in the rich form the personal runtime
+  /// receives it — notification `action` and `source_app`, scroll direction,
+  /// tap duration — as it is pushed.
+  ///
+  /// For a host that feeds a second runtime ([SynheartInstance]), which has
+  /// no collectors of its own: forward the events it needs with
+  /// [SynheartInstance.pushBehaviorEvent]. Unlike [behaviorEventStream] this
+  /// is available before [initialize] and survives the behavior module being
+  /// rebuilt, so one subscription lasts the process. Events arrive only while
+  /// behavior collection runs and its consent is granted.
+  static Stream<BehaviorEventInput> get runtimeBehaviorEventStream =>
+      _runtimeBehaviorEvents.stream;
+
+  static final StreamController<BehaviorEventInput> _runtimeBehaviorEvents =
+      StreamController<BehaviorEventInput>.broadcast();
+
   static Stream<BehaviorEvent> get behaviorEventStream {
     if (shared._behaviorModule == null) {
       throw StateError(

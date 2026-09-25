@@ -153,11 +153,21 @@ class HostDeclarations {
   /// Android + mobile mask only. `4` is the documented mobile value.
   final int? cfiStructuralComponents;
 
+  /// Whether a notification producer actually runs on this host, so that a
+  /// window with no notifications is evidence of low demand rather than no
+  /// evidence (runtime ≥ 0.32.0). Null sends nothing, and the runtime then
+  /// resolves it from `platform` — **true on Android and desktop**. A host on
+  /// one of those platforms whose listener is not running (not granted, not
+  /// implemented) must declare `false`, or every quiet window reads as low
+  /// demand. Older runtimes ignore the key.
+  final bool? notificationsObservable;
+
   const HostDeclarations({
     this.sensing,
     this.deviceClass,
     this.maskProfile,
     this.cfiStructuralComponents,
+    this.notificationsObservable,
   });
 
   /// All four resolved from the config's `platform` string by core-runtime's
@@ -176,7 +186,8 @@ class HostDeclarations {
       sensing == null &&
       deviceClass == null &&
       maskProfile == null &&
-      cfiStructuralComponents == null;
+      cfiStructuralComponents == null &&
+      notificationsObservable == null;
 
   static Object? _wire(Object? v) => switch (v) {
     null => null,
@@ -198,6 +209,8 @@ class HostDeclarations {
     if (maskProfile != null) 'mask_profile': _wire(maskProfile),
     if (cfiStructuralComponents != null)
       'cfi_structural_components': cfiStructuralComponents,
+    if (notificationsObservable != null)
+      'notifications_observable': notificationsObservable,
   };
 }
 

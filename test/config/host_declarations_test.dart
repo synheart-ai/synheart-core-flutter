@@ -33,6 +33,7 @@ void main() {
       expect(map.containsKey('device_class'), isFalse);
       expect(map.containsKey('mask_profile'), isFalse);
       expect(map.containsKey('cfi_structural_components'), isFalse);
+      expect(map.containsKey('notifications_observable'), isFalse);
     });
 
     test('emits no extra_heads and no window_ms', () {
@@ -137,5 +138,41 @@ void main() {
       () => const HostDeclarations(deviceClass: 42).toJson(),
       throwsArgumentError,
     );
+  });
+
+  group('notifications_observable', () {
+    test('absent unless declared, so the runtime resolves it', () {
+      expect(const HostDeclarations().isEmpty, isTrue);
+      expect(
+        buildRuntimeConfigMap(
+          configWith(),
+        ).containsKey('notifications_observable'),
+        isFalse,
+      );
+    });
+
+    test('an explicit false is sent, not dropped', () {
+      // On Android the runtime default is true; a host with no running
+      // listener depends on this false reaching it.
+      const d = HostDeclarations(notificationsObservable: false);
+      expect(d.isEmpty, isFalse);
+      expect(
+        buildRuntimeConfigMap(
+          configWith(declarations: d),
+        )['notifications_observable'],
+        isFalse,
+      );
+    });
+
+    test('true is sent as true', () {
+      expect(
+        buildRuntimeConfigMap(
+          configWith(
+            declarations: const HostDeclarations(notificationsObservable: true),
+          ),
+        )['notifications_observable'],
+        isTrue,
+      );
+    });
   });
 }
