@@ -27,6 +27,26 @@ import '../../models/behavior_event_input.dart';
 ///
 /// Returns `null` for an event the engine has no variant for, so the caller
 /// skips the push entirely rather than inventing one.
+/// Whether [event] is a later outcome of a notification the collector has
+/// already reported, not a new arrival.
+///
+/// Android's collector reports a notification twice: once on arrival
+/// (`action: received`), then again as `ignored` after 30 s without a
+/// response, or `opened` when it is tapped; an updated notification can
+/// re-arm the `ignored` report without a new arrival. The engine counts every
+/// notification event as an arrival and reads `action` as a label on it, so
+/// each follow-up was a second arrival: an ignored notification counted
+/// twice, inflating the notification rate, Interruption Pressure and the lab
+/// summary. The caller skips the runtime push for these.
+///
+/// Calls are not covered: the collector labels a call's arrival `ignored`
+/// too, so it cannot be told apart from its follow-up here.
+bool isNotificationFollowUp(sb.BehaviorEvent event) {
+  if (event.eventType != sb.BehaviorEventType.notification) return false;
+  final action = event.metrics['action'];
+  return action != null && action != 'received';
+}
+
 BehaviorEventInput? translateNativeBehaviorEvent(sb.BehaviorEvent event) {
   final tsMs = _timestampMs(event.timestamp);
   final m = event.metrics;

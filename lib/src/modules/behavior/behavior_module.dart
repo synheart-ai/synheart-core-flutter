@@ -118,6 +118,11 @@ class BehaviorModule extends BaseSynheartModule
     _pushBehaviorEventToRuntime = f;
   }
 
+  /// Observer for every rich event handed to [pushBehaviorEventToRuntime],
+  /// called just before it. Lets the facade republish them for a host that
+  /// feeds a second runtime; see [Synheart.runtimeBehaviorEventStream].
+  void Function(BehaviorEventInput event)? onRuntimeBehaviorEvent;
+
   /// The context-evidence sink — a *second*, independent channel, not an
   /// alternative to [pushBehaviorEventToRuntime].
   ///
@@ -254,6 +259,10 @@ class BehaviorModule extends BaseSynheartModule
     final behaviorEvent = _convertSynheartEvent(event);
     if (behaviorEvent != null) {
       _eventStream.addEvent(behaviorEvent);
+      // Arrivals only: a notification's outcome reported afterwards would
+      // reach the engine as a second arrival. Still published on the event
+      // stream above. See [isNotificationFollowUp].
+      if (isNotificationFollowUp(event)) return;
       // Push directly to runtime so app_switch, notification, etc. are never
       // missed.
       //
@@ -266,6 +275,7 @@ class BehaviorModule extends BaseSynheartModule
       // exclusive per event: pushing both would count every interaction twice.
       final tsMs = behaviorEvent.timestamp.millisecondsSinceEpoch;
       final rich = translateNativeBehaviorEvent(event);
+      if (rich != null) onRuntimeBehaviorEvent?.call(rich);
       final richStatus = rich == null
           ? null
           : _pushBehaviorEventToRuntime?.call(rich);

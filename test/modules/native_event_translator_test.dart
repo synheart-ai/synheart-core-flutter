@@ -184,4 +184,30 @@ void main() {
       expect(out.data, isEmpty);
     });
   });
+
+  group('notification follow-ups are not arrivals', () {
+    sb.BehaviorEvent notif(String? action) => native(
+      sb.BehaviorEventType.notification,
+      {'action': ?action, 'source_app': 'org.telegram.messenger'},
+    );
+
+    test('the arrival is forwarded', () {
+      expect(isNotificationFollowUp(notif('received')), isFalse);
+      expect(isNotificationFollowUp(notif(null)), isFalse);
+    });
+
+    test('ignored and opened are later outcomes of the same notification', () {
+      expect(isNotificationFollowUp(notif('ignored')), isTrue);
+      expect(isNotificationFollowUp(notif('opened')), isTrue);
+    });
+
+    test('calls are left alone: their arrival is labelled ignored too', () {
+      expect(
+        isNotificationFollowUp(
+          native(sb.BehaviorEventType.call, {'action': 'ignored'}),
+        ),
+        isFalse,
+      );
+    });
+  });
 }
