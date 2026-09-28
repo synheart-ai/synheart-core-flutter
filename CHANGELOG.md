@@ -11,12 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`Synheart.ingestStatus()` — why a session has not been delivered.** Surfaces
   the runtime's `synheart_core_ingest_status`: queue depth, consent readiness,
-  rows evicted at the cap, rows refused for want of credentials, the background
-  loop's stall reason, and the server's message from the last failed upload. A
-  4xx is treated as final, so a rejected row is discarded without being evicted
-  or refused and without a success recorded; `last_upload_error` is the only
-  place that outcome shows. Looked up optionally, so an older vendored runtime
-  returns null rather than failing.
+  rows evicted at the cap, rows refused for want of credentials, the timestamp
+  of the last successful upload, and the background loop's stall reason.
+  Together these separate "still uploading" from "stalled" from "collected and
+  then dropped", which a host previously could not tell apart at all. Looked up
+  optionally, so an older vendored runtime returns null rather than failing.
 
 ### Added
 

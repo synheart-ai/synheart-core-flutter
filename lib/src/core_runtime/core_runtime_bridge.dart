@@ -2319,9 +2319,8 @@ class CoreRuntimeBridge {
   }
 
   /// Cloud ingest health: queue depth, consent readiness, evicted and refused
-  /// totals, the background loop's stall reason, and what the server said the
-  /// last time an upload failed. Null when the vendored runtime predates the
-  /// symbol.
+  /// totals, last successful upload, and the background loop's stall reason.
+  /// Null when the vendored runtime predates the symbol.
   Map<String, dynamic>? ingestStatus() {
     final fn = _ffi.ingestStatus;
     if (fn == null) return null;
