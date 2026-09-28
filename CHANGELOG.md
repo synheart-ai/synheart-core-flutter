@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Synheart.ingestStatus()` — why a session has not been delivered.** Surfaces
+  the runtime's `synheart_core_ingest_status`: queue depth, consent readiness,
+  rows evicted at the cap, rows refused for want of credentials, the background
+  loop's stall reason, and the server's message from the last failed upload. A
+  4xx is treated as final, so a rejected row is discarded without being evicted
+  or refused and without a success recorded; `last_upload_error` is the only
+  place that outcome shows. Looked up optionally, so an older vendored runtime
+  returns null rather than failing.
+
+### Added
+
 - **`labEnsureMetadataAsync`, so a host can keep the metadata upload off its
   UI isolate.** `labEnsureMetadata` performs the round-trip on the calling
   isolate. It short-circuits when the payload hash is unchanged, so nearly

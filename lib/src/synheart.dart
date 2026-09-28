@@ -3825,6 +3825,19 @@ class Synheart {
     );
   }
 
+  /// Cloud ingest health: `configured`, `last_success_at_ms`, `pending`,
+  /// `consent_ready`, `queue_len`, `dropped_total`, `refused_total`,
+  /// `stall_reason` and `last_upload_error`.
+  ///
+  /// This is the answer to "the session finalized and never arrived". A 4xx is
+  /// treated as final, so a rejected row is discarded without being evicted or
+  /// refused and without a success being recorded — `last_upload_error` is the
+  /// only place that outcome is visible.
+  ///
+  /// Null when the SDK is not initialized or the vendored runtime predates the
+  /// symbol.
+  static Map<String, dynamic>? ingestStatus() => _coreRuntime?.ingestStatus();
+
   /// Mark cached lab metadata as needing re-upload. Hosts call this on
   /// profile edits, device swaps, app version bumps, and consent changes.
   static void labMarkMetadataDirty(String reason) {
