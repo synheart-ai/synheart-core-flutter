@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`labEnsureMetadataAsync`, so a host can keep the metadata upload off its
+  UI isolate.** `labEnsureMetadata` performs the round-trip on the calling
+  isolate. It short-circuits when the payload hash is unchanged, so nearly
+  every call is free and the blocking one is rare — which is exactly what
+  makes it hard to place correctly: a caller cannot tell beforehand whether
+  this is the call that uploads, and on a slow link the one that does runs
+  long enough for the platform to raise a not-responding dialog. The new form
+  runs the same call on a helper isolate and returns the same `meta_id`. The
+  synchronous form is unchanged and still correct off the UI isolate.
+
 ## [0.15.0] - 2026-09-25
 
 ### Added — per-instance HSI delivery

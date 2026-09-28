@@ -3801,6 +3801,30 @@ class Synheart {
     );
   }
 
+  /// [labEnsureMetadata] on a helper isolate.
+  ///
+  /// Most calls short-circuit on an unchanged payload hash and cost nothing,
+  /// but the ones that do upload run for as long as the request takes, and
+  /// the caller cannot tell which it is beforehand. Call this form from UI
+  /// code so a slow link cannot stall the frame.
+  static Future<String?> labEnsureMetadataAsync({
+    required String deviceId,
+    required String platform,
+    required String osVersion,
+    String? userInfoJson,
+    String? deviceExtraJson,
+  }) async {
+    final rt = _coreRuntime;
+    if (rt == null) return null;
+    return rt.labEnsureMetadataAsync(
+      deviceId: deviceId,
+      platform: platform,
+      osVersion: osVersion,
+      userInfoJson: userInfoJson,
+      deviceExtraJson: deviceExtraJson,
+    );
+  }
+
   /// Mark cached lab metadata as needing re-upload. Hosts call this on
   /// profile edits, device swaps, app version bumps, and consent changes.
   static void labMarkMetadataDirty(String reason) {
