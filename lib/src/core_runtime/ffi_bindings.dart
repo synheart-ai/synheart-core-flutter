@@ -735,6 +735,7 @@ class SynheartCoreFFI {
     labEnsureMetadata;
     labMarkMetadataDirty;
     labCurrentMetadataId;
+    ingestStatus;
     version;
     prioritySetProvider;
     prioritySetMetricOverride;
@@ -1779,6 +1780,16 @@ class SynheartCoreFFI {
               'synheart_core_lab_mark_metadata_dirty',
             ),
       );
+
+  /// Cloud ingest health snapshot as JSON. Optional: older vendored runtimes
+  /// do not export it.
+  late final Pointer<Utf8> Function(Pointer<Void>)? ingestStatus = _optional(
+    'synheart_core_ingest_status',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_ingest_status',
+    ),
+  );
+
   late final Pointer<Utf8> Function(Pointer<Void>)? labCurrentMetadataId =
       _optional(
         'synheart_core_lab_current_metadata_id',

@@ -2318,6 +2318,15 @@ class CoreRuntimeBridge {
     });
   }
 
+  /// Cloud ingest health: queue depth, consent readiness, evicted and refused
+  /// totals, last successful upload, and the background loop's stall reason.
+  /// Null when the vendored runtime predates the symbol.
+  Map<String, dynamic>? ingestStatus() {
+    final fn = _ffi.ingestStatus;
+    if (fn == null) return null;
+    return _callJson(() => fn(_handle));
+  }
+
   Map<String, dynamic>? uploadMetadata() {
     return _callJson(() => _ffi.uploadMetadata(_handle));
   }

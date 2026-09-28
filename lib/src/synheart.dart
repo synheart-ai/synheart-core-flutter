@@ -3825,6 +3825,20 @@ class Synheart {
     );
   }
 
+  /// Cloud ingest health: `configured`, `last_success_at_ms`, `pending`,
+  /// `consent_ready`, `queue_len`, `dropped_total`, `refused_total` and
+  /// `stall_reason`.
+  ///
+  /// Read these together rather than singly. `queue_len` falling to zero is not
+  /// by itself delivery: a row the server rejects is discarded without being
+  /// evicted or refused, so the counters stay at zero and the queue drains
+  /// exactly as it would on success. `last_success_at_ms` is what separates the
+  /// two.
+  ///
+  /// Null when the SDK is not initialized or the vendored runtime predates the
+  /// symbol.
+  static Map<String, dynamic>? ingestStatus() => _coreRuntime?.ingestStatus();
+
   /// Mark cached lab metadata as needing re-upload. Hosts call this on
   /// profile edits, device swaps, app version bumps, and consent changes.
   static void labMarkMetadataDirty(String reason) {
