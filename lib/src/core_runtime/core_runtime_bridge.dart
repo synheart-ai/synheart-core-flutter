@@ -3047,6 +3047,64 @@ class CoreRuntimeBridge {
     }
   }
 
+  /// [labEnsureMetadata] on a helper isolate.
+  ///
+  /// The synchronous form runs the upload round-trip on the calling isolate.
+  /// It short-circuits when the payload hash is unchanged, so most calls cost
+  /// nothing — but the calls that do upload are bounded only by the client's
+  /// own timeout and retries, which on a slow link is long enough for the
+  /// platform to decide the app has stopped responding. A caller on the UI
+  /// isolate cannot tell the two cases apart before making the call, so from
+  /// UI code prefer this form.
+  ///
+  /// Returns null under the same conditions as [labEnsureMetadata], and also
+  /// when the bridge is disposed or the shared library cannot be loaded.
+  Future<String?> labEnsureMetadataAsync({
+    required String deviceId,
+    required String platform,
+    required String osVersion,
+    String? userInfoJson,
+    String? deviceExtraJson,
+  }) {
+    if (_disposed) return Future<String?>.value();
+    final handleAddr = _handle.address;
+    final user = userInfoJson ?? '';
+    final extra = deviceExtraJson ?? '';
+    return _runFfi(() {
+      final ffi = SynheartCoreFFI.load();
+      final fn = ffi?.labEnsureMetadata;
+      if (ffi == null || fn == null) return null;
+      final handle = Pointer<Void>.fromAddress(handleAddr);
+      final pDev = deviceId.toNativeUtf8();
+      final pPlat = platform.toNativeUtf8();
+      final pOs = osVersion.toNativeUtf8();
+      final pUser = user.toNativeUtf8();
+      final pExtra = extra.toNativeUtf8();
+      try {
+        final ptr = fn(
+          handle,
+          pDev.cast(),
+          pPlat.cast(),
+          pOs.cast(),
+          pUser.cast(),
+          pExtra.cast(),
+        );
+        if (ptr == nullptr) return null;
+        final raw = ptr.toDartString();
+        ffi.coreFreeString(ptr);
+        return raw;
+      } catch (_) {
+        return null;
+      } finally {
+        malloc.free(pDev);
+        malloc.free(pPlat);
+        malloc.free(pOs);
+        malloc.free(pUser);
+        malloc.free(pExtra);
+      }
+    });
+  }
+
   /// Mark the cached lab metadata as needing re-upload (profile edit, device
   /// swap, app version bump, consent change). The next [labEnsureMetadata]
   /// call will POST regardless of hash.
