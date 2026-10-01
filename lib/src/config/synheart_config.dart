@@ -342,10 +342,23 @@ class WearConfig {
   /// Sample rate in Hz
   final double sampleRateHz;
 
+  /// Start the platform-health reader (HealthKit / Health Connect) as soon as
+  /// biosignals consent is granted. On by default.
+  ///
+  /// Set it to false when the host pushes heart rate itself
+  /// ([Synheart.pushWearHr] — a watch relay, a BLE strap) and uses platform
+  /// health only when the user picks it. Granting consent then shows no
+  /// HealthKit / Health Connect permission dialog and reads no history; the
+  /// reader starts on [Synheart.startWearCollection]. Without this, a host
+  /// that re-grants a remembered consent at launch gets the permission dialog
+  /// on every launch.
+  final bool autoStartPlatformHealth;
+
   const WearConfig({
     this.enableHighFrequencyHrv = false,
     this.enableCaching = true,
     this.sampleRateHz = 1.0,
+    this.autoStartPlatformHealth = true,
   });
 }
 

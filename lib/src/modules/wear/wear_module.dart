@@ -63,6 +63,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     bool useSynheartWear = true,
     bool focusEnabled = false,
     bool emotionEnabled = false,
+    this.autoStartOnConsent = true,
   }) : _consent = consent,
        _sources =
            sources ??
@@ -84,6 +85,26 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
                // WearSourceHandler, which is the supported way to supply a fake
                // in tests. No sources means no data, which is honest.
                : const <WearSourceHandler>[]);
+
+  /// Whether consent alone starts the sources (see
+  /// [WearConfig.autoStartPlatformHealth]). When false they start only after
+  /// [requestCollection].
+  final bool autoStartOnConsent;
+
+  bool _collectionRequested = false;
+
+  bool get _mayCollect => autoStartOnConsent || _collectionRequested;
+
+  /// Ask for collection explicitly — what [Synheart.startWearCollection]
+  /// does. With [autoStartOnConsent] false this is the only thing that
+  /// starts the sources; it still waits for biosignals consent.
+  Future<void> requestCollection() async {
+    _collectionRequested = true;
+    if (status == ModuleStatus.running &&
+        _consent.current().allowsChannel('biosignals.vitals')) {
+      await _startDataCollection();
+    }
+  }
 
   /// Update module enablement status
   ///
@@ -158,7 +179,8 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
             // );
             await _stopDataCollection();
           } else if (consent.allowsChannel('biosignals.vitals') &&
-              _subscriptions.isEmpty) {
+              _subscriptions.isEmpty &&
+              _mayCollect) {
             // Consent granted (either initially or after revoke) — start data collection.
             await _startDataCollection();
           }
@@ -199,7 +221,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     // Start data collection only when consent is granted.
     // This prevents OS health permission dialogs from appearing before the user
     // grants Synheart biosignals consent.
-    if (_consent.current().allowsChannel('biosignals.vitals')) {
+    if (_consent.current().allowsChannel('biosignals.vitals') && _mayCollect) {
       await _startDataCollection();
     }
   }
@@ -350,7 +372,8 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     await _consentSubscription?.cancel();
     _consentSubscription = null;
 
-    // Stop data collection
+    // Stop data collection; a later start waits for a new request again.
+    _collectionRequested = false;
     await _stopDataCollection();
   }
 
