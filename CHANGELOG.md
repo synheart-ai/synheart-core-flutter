@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-01
+
 ### Added
 
 - **`Synheart.ingestStatus()` — why a session has not been delivered.** Surfaces
@@ -1013,7 +1015,8 @@ breaking change to `processVendorEvent`.
   `synheart_behavior ^0.3.0`, `synheart_auth ^0.1.1`) instead of git
   refs.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.14.0...v0.15.0
 [0.12.0]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.12.0
 [0.11.1]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.11.1
