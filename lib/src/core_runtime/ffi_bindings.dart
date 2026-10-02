@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../core/logger.dart';
+import 'runtime_exception.dart';
 import 'sdk_ffi.dart';
 
 // ── C function typedefs (native + Dart) ─────────────────────────────────
@@ -695,6 +696,11 @@ class SynheartCoreFFI {
 
   static SynheartCoreFFI? _instance;
 
+  /// Why the last [load] returned null; null while the runtime is loaded or
+  /// before the first attempt. [load] still returns null on failure so callers
+  /// degrade as before; init reads this to tell the developer what to fix.
+  static RuntimeLoadFailure? lastLoadFailure;
+
   /// Optional `synheart_core_*` symbols the loaded library does not export,
   /// recorded the first time each is probed.
   ///
@@ -789,6 +795,7 @@ class SynheartCoreFFI {
     if (_instance != null) return _instance;
 
     DynamicLibrary? lib;
+    lastLoadFailure = null;
     try {
       if (Platform.isIOS) {
         // iOS embeds SynheartCoreRuntime.framework into Runner.app/Frameworks/
@@ -820,10 +827,20 @@ class SynheartCoreFFI {
         error: e,
         stackTrace: st,
       );
+      lastLoadFailure = RuntimeLoadFailure(
+        classifyRuntimeLoadFailure('$e'),
+        '$e',
+      );
       return null;
     }
 
-    if (lib == null) return null;
+    if (lib == null) {
+      lastLoadFailure ??= const RuntimeLoadFailure(
+        SynheartRuntimeErrorKind.notInstalled,
+        'no runtime library found for this platform',
+      );
+      return null;
+    }
     _instance = SynheartCoreFFI._(lib);
     return _instance;
   }
@@ -839,16 +856,26 @@ class SynheartCoreFFI {
         '${Platform.pathSeparator}runtime'
         '${Platform.pathSeparator}$platform'
         '${Platform.pathSeparator}$libname';
-    if (File(vendored).existsSync()) {
+    final vendoredExists = File(vendored).existsSync();
+    String? vendoredError;
+    if (vendoredExists) {
       try {
         return DynamicLibrary.open(vendored);
-      } catch (_) {
+      } catch (e) {
         // fall through to bare lookup
+        vendoredError = '$e';
       }
     }
     try {
       return DynamicLibrary.open(libname);
-    } catch (_) {
+    } catch (e) {
+      // A vendored file that exists but would not load is the informative
+      // failure; the bare-name error then only says it was not on the path.
+      final cause = vendoredError ?? '$e';
+      lastLoadFailure = RuntimeLoadFailure(
+        classifyRuntimeLoadFailure(cause, fileMissing: !vendoredExists),
+        cause,
+      );
       return null;
     }
   }

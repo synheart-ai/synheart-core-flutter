@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Install hints now recommend runtime 0.36.0.** The SDK was verified end to
+  end against it, and it is the first recommended release that records its ABI
+  version, so `synheart doctor` can confirm compatibility after installing it.
+  Runtimes from 0.20.0 up to 0.36.0 still initialise; they log as older than
+  the bindings expect.
+
+- **BREAKING (behavior): `Synheart.initialize` now throws
+  `SynheartRuntimeException` (`kind: incompatible`) for an incompatible
+  runtime.** An ABI major other than 1, or a runtime below 0.20.0 that reports
+  no ABI, used to be logged as "core runtime bridge unavailable" while init
+  carried on without HSI. Migration: run the command in
+  `exception.installCommand` (`synheart install runtime --version <ver>`), or
+  catch the exception where you call `initialize`. A missing, wrong-architecture
+  or unloadable runtime still does not throw.
+- The "native runtime not loaded" warning no longer tells you to run
+  `flutter clean`; it prints the specific reason and the install command.
+
+### Added
+
+- **`SynheartRuntimeException` and `SynheartRuntimeErrorKind`** (`notInstalled`,
+  `wrongArchitecture`, `incompatible`, `loadFailed`), with `message`,
+  `runtimeVersion`, `runtimeAbi`, `requiredAbi`, `recommendedVersion`,
+  `installCommand` and `cause`.
+- **`Synheart.runtimeError`** and a `runtimeError` key in
+  `Synheart.runtimeDiagnostics()` give the reason the runtime is unavailable.
+- **ABI-based runtime compatibility.** Runtimes 0.33.0 and later report an ABI
+  in `build_info`; the SDK requires `RuntimeCompat.requiredAbi` (`1.0`) and
+  adds `RuntimeCompatStatus.incompatibleAbi` and `RuntimeCompatResult.abi`.
+  Earlier runtimes fall back to the version check.
+- **`synheart_runtime.json`** at the package root states the required ABI,
+  minimum and tested runtime versions for the synheart CLI.
+
 ## [0.16.0] - 2026-10-01
 
 ### Added
