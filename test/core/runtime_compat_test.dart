@@ -117,7 +117,7 @@ void main() {
       expect(e.runtimeAbi, '2.0');
       expect(e.requiredAbi, RuntimeCompat.requiredAbi);
       expect(e.recommendedVersion, RuntimeCompat.writtenAgainst);
-      expect(e.installCommand, contains('--version 0.31.1'));
+      expect(e.installCommand, contains('--version 0.36.0'));
       expect(e.toString(), contains('incompatible'));
     });
     test('a library without build info is an incompatible runtime', () {

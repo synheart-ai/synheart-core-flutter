@@ -11,9 +11,11 @@ import '../version.dart';
 class RuntimeCompat {
   RuntimeCompat._();
 
-  /// The runtime release these bindings were written and tested against.
-  /// Bump it in the same change that adopts a new symbol or a moved shape.
-  static const String writtenAgainst = '0.31.1';
+  /// The newest runtime release these bindings were verified against, and the
+  /// release every install hint recommends. Bump it when the bindings adopt a
+  /// new symbol or a moved shape, or once they are verified on a newer
+  /// release.
+  static const String writtenAgainst = '0.36.0';
 
   /// Oldest runtime the bindings are known to load and behave on. Below this
   /// the SDK refuses to initialise rather than run with entrypoints that no
@@ -111,9 +113,9 @@ class RuntimeCompat {
         status: RuntimeCompatStatus.older,
         message:
             '[Synheart] runtime $version is older than $writtenAgainst, which '
-            'these bindings were written against. Newer symbols fall back '
-            '(buffered HSI, context fan-in, secure-storage marker …) and '
-            'behaviour documented for $writtenAgainst may not hold. Update '
+            'these bindings were verified against. Symbols added since then '
+            'fall back, and behaviour documented for $writtenAgainst may not '
+            'hold. Update '
             'the vendored runtime with `synheart install runtime`.',
       );
     }

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Install hints now recommend runtime 0.36.0.** The SDK was verified end to
+  end against it, and it is the first recommended release that records its ABI
+  version, so `synheart doctor` can confirm compatibility after installing it.
+  Runtimes from 0.20.0 up to 0.36.0 still initialise; they log as older than
+  the bindings expect.
+
 - **BREAKING (behavior): `Synheart.initialize` now throws
   `SynheartRuntimeException` (`kind: incompatible`) for an incompatible
   runtime.** An ABI major other than 1, or a runtime below 0.20.0 that reports
