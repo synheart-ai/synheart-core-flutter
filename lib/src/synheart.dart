@@ -1485,6 +1485,8 @@ class Synheart {
         focusEnabled:
             true, // 1s interval so runtime gets enough samples per 10s window for HSI
         emotionEnabled: true,
+        autoStartOnConsent:
+            resolvedConfig.wearConfig?.autoStartPlatformHealth ?? true,
       );
       _phoneModule = PhoneModule(
         capabilities: _capabilityModule!,
@@ -4174,6 +4176,9 @@ class Synheart {
       if (interval != null) {
         await _wearModule!.updateCollectionInterval(interval);
       }
+      // The module may be running without its sources (autoStartPlatformHealth
+      // false): this is the explicit request that starts them.
+      await _wearModule!.requestCollection();
       return;
     }
 
@@ -4182,6 +4187,7 @@ class Synheart {
       await _wearModule!.updateCollectionInterval(interval);
     }
     await _wearModule!.start();
+    await _wearModule!.requestCollection();
     // SynheartLogger.log('[Synheart] Wear data collection started');
   }
 

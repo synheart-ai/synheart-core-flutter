@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-01
+
 ### Added
 
 - **`Synheart.ingestStatus()` — why a session has not been delivered.** Surfaces
@@ -28,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   long enough for the platform to raise a not-responding dialog. The new form
   runs the same call on a helper isolate and returns the same `meta_id`. The
   synchronous form is unchanged and still correct off the UI isolate.
+
+### Added
+
+- **`WearConfig.autoStartPlatformHealth`, to keep the platform-health reader
+  off until it is wanted.** Default `true` (unchanged behaviour). With
+  `false`, granting biosignals consent no longer starts the platform-health
+  source (HealthKit / Health Connect): no permission dialog and no history
+  read until the host calls `Synheart.startWearCollection()`. For hosts that
+  push heart rate themselves (`pushWearHr` — a watch relay, a BLE strap) and
+  use platform health only when the user picks it. Without it, a host that
+  re-grants a remembered consent at launch showed the Health Connect dialog
+  on every launch. Behind it: `WearModule(autoStartOnConsent:)` and
+  `WearModule.requestCollection()`; `startWearCollection()` now requests
+  collection even when the module is already running.
 
 ## [0.15.0] - 2026-09-25
 
@@ -999,7 +1015,8 @@ breaking change to `processVendorEvent`.
   `synheart_behavior ^0.3.0`, `synheart_auth ^0.1.1`) instead of git
   refs.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/synheart-ai/synheart-core-flutter/compare/v0.14.0...v0.15.0
 [0.12.0]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.12.0
 [0.11.1]: https://github.com/synheart-ai/synheart-core-flutter/releases/tag/v0.11.1

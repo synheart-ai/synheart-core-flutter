@@ -106,7 +106,7 @@ Or declare the current package line explicitly:
 
 ```yaml
 dependencies:
-  synheart_core: ^0.15.0
+  synheart_core: ^0.16.0
 ```
 
 Then install the native runtimes. The package alone loads no runtime and
@@ -398,6 +398,21 @@ include:
 - `vendorSync`
 - `research`
 - `syni`
+
+**Platform health only when chosen.** By default, biosignals consent starts
+the platform-health reader (HealthKit / Health Connect), which shows the OS
+permission dialog and reads recent history. A host that pushes heart rate
+itself (`pushWearHr` — a watch relay, a BLE strap) and offers platform health
+as one source among several can keep it off until the user picks it:
+
+```dart
+wearConfig: const WearConfig(autoStartPlatformHealth: false),
+// later, only when the user chooses Apple Health / Health Connect:
+await Synheart.startWearCollection();
+```
+
+Without it, a host that re-grants a remembered consent at launch shows the
+permission dialog on every launch. (Since 0.16.0.)
 
 A feature collects only when its config is declared **and** its consent is
 granted. Declaring `wearConfig` while holding only `behavior` consent collects
