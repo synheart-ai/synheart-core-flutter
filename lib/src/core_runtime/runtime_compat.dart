@@ -1,3 +1,5 @@
+import '../version.dart';
+
 /// Runtime-version compatibility for the hand-written C ABI bindings.
 ///
 /// The runtime's C surface is additive and stable — a binding written against
@@ -19,6 +21,28 @@ class RuntimeCompat {
   /// runtime's `SDK-CONTRACT-CHANGES.md`.
   static const String minimum = '0.20.0';
 
+  /// The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
+  /// any removal, rename or signature change and MINOR on additions only, so a
+  /// runtime is compatible when its MAJOR equals [requiredAbiMajor] and its
+  /// MINOR is at least [requiredAbiMinor]. This, not the release version, is
+  /// the contract; the version checks only grade runtimes that satisfy it.
+  static const String requiredAbi = '1.0';
+  static const int requiredAbiMajor = 1;
+  static const int requiredAbiMinor = 0;
+
+  /// Installs the release the bindings were written against.
+  static const String installCommand =
+      'synheart install runtime --version $writtenAgainst';
+
+  static const String _fix = 'Install runtime $writtenAgainst: $installCommand';
+
+  /// Parse `MAJOR.MINOR` (extra components ignored); null if malformed.
+  static ({int major, int minor})? parseAbi(String abi) {
+    final m = RegExp(r'^(\d+)\.(\d+)').firstMatch(abi.trim());
+    if (m == null) return null;
+    return (major: int.parse(m.group(1)!), minor: int.parse(m.group(2)!));
+  }
+
   /// Compare two dotted numeric versions (`0.31.1`). Non-numeric suffixes are
   /// ignored; a missing component reads as `0`. Negative when [a] < [b].
   static int compare(String a, String b) {
@@ -37,14 +61,32 @@ class RuntimeCompat {
     return 0;
   }
 
-  /// Evaluate the loaded runtime's `build_info` against [minimum] and
-  /// [writtenAgainst].
+  /// Evaluate the loaded runtime's `build_info`: its ABI against
+  /// [requiredAbi] when it reports one (runtime 0.33.0+), otherwise its
+  /// version against [minimum]; then against [writtenAgainst] for status.
   static RuntimeCompatResult check(Map<String, dynamic>? buildInfo) {
     final raw = buildInfo?['core_runtime'];
     final version = raw is String && raw.isNotEmpty ? raw : null;
+    final rawAbi = buildInfo?['abi'];
+    final parsedAbi = rawAbi is String ? parseAbi(rawAbi) : null;
+    final abi = parsedAbi == null ? null : (rawAbi as String);
+    if (parsedAbi != null &&
+        (parsedAbi.major != requiredAbiMajor ||
+            parsedAbi.minor < requiredAbiMinor)) {
+      return RuntimeCompatResult(
+        version: version,
+        abi: abi,
+        status: RuntimeCompatStatus.incompatibleAbi,
+        message:
+            'Core runtime ${version ?? '(unknown version)'} (ABI $abi) is '
+            'incompatible with synheart_core $synheartCoreVersion (needs ABI '
+            '$requiredAbiMajor.x). $_fix',
+      );
+    }
     if (version == null) {
-      return const RuntimeCompatResult(
+      return RuntimeCompatResult(
         version: null,
+        abi: abi,
         status: RuntimeCompatStatus.unknown,
         message:
             '[Synheart] runtime version unknown — build_info carried no '
@@ -55,16 +97,17 @@ class RuntimeCompat {
     if (compare(version, minimum) < 0) {
       return RuntimeCompatResult(
         version: version,
+        abi: abi,
         status: RuntimeCompatStatus.tooOld,
         message:
-            '[Synheart] runtime $version is below the minimum $minimum these '
-            'bindings support — refusing to initialise. Update the vendored '
-            'runtime with `synheart install runtime`.',
+            'Core runtime $version is incompatible with synheart_core '
+            '$synheartCoreVersion (needs runtime $minimum or newer). $_fix',
       );
     }
     if (compare(version, writtenAgainst) < 0) {
       return RuntimeCompatResult(
         version: version,
+        abi: abi,
         status: RuntimeCompatStatus.older,
         message:
             '[Synheart] runtime $version is older than $writtenAgainst, which '
@@ -76,6 +119,7 @@ class RuntimeCompat {
     }
     return RuntimeCompatResult(
       version: version,
+      abi: abi,
       status: RuntimeCompatStatus.ok,
       message: '[Synheart] runtime $version (bindings: $writtenAgainst)',
     );
@@ -89,8 +133,14 @@ enum RuntimeCompatStatus {
   /// Loads and works, but predates the version the bindings assume.
   older,
 
-  /// Below [RuntimeCompat.minimum]; initialisation is refused.
+  /// Below [RuntimeCompat.minimum] on a runtime that reports no ABI;
+  /// initialisation is refused.
   tooOld,
+
+  /// The runtime's ABI major differs from [RuntimeCompat.requiredAbiMajor] or
+  /// its minor is below [RuntimeCompat.requiredAbiMinor]; initialisation is
+  /// refused.
+  incompatibleAbi,
 
   /// `build_info` did not report a version.
   unknown,
@@ -99,13 +149,19 @@ enum RuntimeCompatStatus {
 class RuntimeCompatResult {
   const RuntimeCompatResult({
     required this.version,
+    this.abi,
     required this.status,
     required this.message,
   });
 
   final String? version;
+
+  /// The runtime's ABI (`MAJOR.MINOR`); null for runtimes before 0.33.0.
+  final String? abi;
   final RuntimeCompatStatus status;
   final String message;
 
-  bool get isAcceptable => status != RuntimeCompatStatus.tooOld;
+  bool get isAcceptable =>
+      status != RuntimeCompatStatus.tooOld &&
+      status != RuntimeCompatStatus.incompatibleAbi;
 }
