@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`SynheartInstance.createAsync` / `CoreRuntimeBridge.createAsync` - create a
+  runtime without blocking the host's UI.** Native runtime creation (store open
+  and migrations, cloud connector, identity restore) is a blocking call of
+  0.5-1.5 s on a mid-range Android phone, and since Flutter 3.29 the Dart
+  isolate shares the platform main thread, so `create` froze rendering for that
+  long. `createAsync` runs only that call on a background isolate and wires
+  the instance (logging, storage and crypto callbacks) on the calling isolate
+  exactly as `create` does, falling back to an on-thread create if an isolate
+  cannot run. Additive: `create` is unchanged.
+- Not for time-critical creation: on some devices background isolates queue
+  behind other isolate work rather than run in parallel, so wall-clock time can
+  exceed the synchronous call. The personal runtime created by
+  `Synheart.initialize` therefore stays synchronous.
+
 ## [0.16.0] - 2026-10-01
 
 ### Added
