@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-07
+
 ### Added
 
 - **`SynheartInstance.createAsync` / `CoreRuntimeBridge.createAsync` - create a
@@ -22,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind other isolate work rather than run in parallel, so wall-clock time can
   exceed the synchronous call. The personal runtime created by
   `Synheart.initialize` therefore stays synchronous.
+
+### Changed
+
+- **`synheart_wear` minimum raised to 0.5.1** (`>=0.5.1 <0.6.0`). On iOS the
+  wear source's 1 s heart-rate stream ran every tick as a HealthKit query per
+  metric type over the last 30 days and fed the 30-day mean heart rate in as
+  the current one; 0.5.1 bounds real-time reads to the last 2 minutes, at most
+  every 10 s. The HR samples this module receives on iOS are now recent ones.
 
 ## [0.16.0] - 2026-10-01
 
