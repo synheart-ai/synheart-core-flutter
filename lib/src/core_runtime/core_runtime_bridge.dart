@@ -592,7 +592,53 @@ class CoreRuntimeBridge {
   static CoreRuntimeBridge? create(Map<String, dynamic> config) {
     final ffi = SynheartCoreFFI.load();
     if (ffi == null) return null;
+    final prepared = _prepareCoreConfig(config);
+    return _wrapNewHandle(
+      ffi,
+      _coreNewAt(jsonEncode(prepared.config)),
+      prepared,
+    );
+  }
 
+  /// [create], with the native `synheart_core_new` call on a background
+  /// isolate.
+  ///
+  /// Creating the runtime (store open + migrations, cloud connector, identity
+  /// restore) is a blocking call of 0.5-1.5 s on a mid-range Android phone,
+  /// and since Flutter 3.29 the Dart isolate shares the platform main thread -
+  /// so the synchronous [create] froze rendering for that long. Only the
+  /// handle creation moves off-thread: the returned bridge is wired (logging,
+  /// and the caller's storage/crypto callbacks) on the calling isolate exactly
+  /// as [create] does. Falls back to an on-thread create if the isolate cannot
+  /// run.
+  ///
+  /// Not for time-critical creation: background isolates can queue behind
+  /// other isolate work on some devices (measured on a Galaxy A23), so this can
+  /// take much longer in wall-clock time than the synchronous call.
+  static Future<CoreRuntimeBridge?> createAsync(
+    Map<String, dynamic> config,
+  ) async {
+    final ffi = SynheartCoreFFI.load();
+    if (ffi == null) return null;
+    final prepared = _prepareCoreConfig(config);
+    final json = jsonEncode(prepared.config);
+    _CoreNewResult result;
+    try {
+      result = await Isolate.run(() => _coreNewAt(json));
+    } catch (e) {
+      SynheartLogger.log(
+        '[Synheart FFI] background coreNew unavailable ($e); creating on the '
+        'calling isolate',
+        name: 'synheart.ffi',
+      );
+      result = _coreNewAt(json);
+    }
+    return _wrapNewHandle(ffi, result, prepared);
+  }
+
+  /// Config normalisation shared by [create] and [createAsync].
+  static ({Map<String, dynamic> config, bool deviceAuthForcedOff})
+  _prepareCoreConfig(Map<String, dynamic> config) {
     final runtimeConfig = Map<String, dynamic>.from(config);
 
     // Optional compatibility guard (off by default) for runtimes where
@@ -628,60 +674,52 @@ class CoreRuntimeBridge {
         !rawSubjectId.startsWith('sub_')) {
       runtimeConfig['subject_id'] = 'sub_$rawSubjectId';
     }
+    return (config: runtimeConfig, deviceAuthForcedOff: deviceAuthForcedOff);
+  }
 
-    final cJson = jsonEncode(runtimeConfig).toNativeUtf8();
-    try {
-      final handle = ffi.coreNew(cJson.cast());
-      if (handle == nullptr) {
-        // Pull Rust's last-error message (set by synheart_core_new on every
-        // nullptr return). Falls back to a keys/empty dump for older
-        // runtime builds that don't export the symbol.
-        String? reason;
-        final lastErr = ffi.coreLastError;
-        if (lastErr != null) {
-          final p = lastErr();
-          if (p != nullptr) {
-            reason = p.toDartString();
-            ffi.coreFreeString(p);
+  /// Turns a `synheart_core_new` result into a bridge, or logs why it failed.
+  static CoreRuntimeBridge? _wrapNewHandle(
+    SynheartCoreFFI ffi,
+    _CoreNewResult result,
+    ({Map<String, dynamic> config, bool deviceAuthForcedOff}) prepared,
+  ) {
+    if (result.address == 0) {
+      final reason = result.error;
+      if (reason != null) {
+        SynheartLogger.log(
+          '[Synheart FFI] coreNew failed: $reason',
+          name: 'synheart.ffi',
+        );
+      } else {
+        // Older runtime build without the last-error symbol — fall back
+        // to listing which Dart-side fields look empty so the operator
+        // still has something to grep on. Avoids logging values
+        // (some are sensitive).
+        final emptyFields = <String>[];
+        prepared.config.forEach((k, v) {
+          if (v == null) {
+            emptyFields.add('$k=null');
+          } else if (v is String && v.isEmpty) {
+            emptyFields.add('$k=""');
           }
-        }
-        if (reason != null) {
-          SynheartLogger.log(
-            '[Synheart FFI] coreNew failed: $reason',
-            name: 'synheart.ffi',
-          );
-        } else {
-          // Older runtime build without the last-error symbol — fall back
-          // to listing which Dart-side fields look empty so the operator
-          // still has something to grep on. Avoids logging values
-          // (some are sensitive).
-          final emptyFields = <String>[];
-          runtimeConfig.forEach((k, v) {
-            if (v == null) {
-              emptyFields.add('$k=null');
-            } else if (v is String && v.isEmpty) {
-              emptyFields.add('$k=""');
-            }
-          });
-          SynheartLogger.log(
-            '[Synheart FFI] coreNew returned nullptr (no last-error symbol). '
-            'keys=${runtimeConfig.keys.toList()} empty=$emptyFields',
-            name: 'synheart.ffi',
-          );
-        }
-        return null;
+        });
+        SynheartLogger.log(
+          '[Synheart FFI] coreNew returned nullptr (no last-error symbol). '
+          'keys=${prepared.config.keys.toList()} empty=$emptyFields',
+          name: 'synheart.ffi',
+        );
       }
-      // §1b: logging after core creation — avoids crash from async
-      // NativeCallable.listener trampoline during synchronous coreNew.
-      initRuntimeLogging(ffi: ffi);
-      return CoreRuntimeBridge._(
-        ffi,
-        handle,
-        deviceAuthTemporarilyDisabledForSubjectCompat: deviceAuthForcedOff,
-      );
-    } finally {
-      malloc.free(cJson);
+      return null;
     }
+    // §1b: logging after core creation — avoids crash from async
+    // NativeCallable.listener trampoline during synchronous coreNew.
+    initRuntimeLogging(ffi: ffi);
+    return CoreRuntimeBridge._(
+      ffi,
+      Pointer<Void>.fromAddress(result.address),
+      deviceAuthTemporarilyDisabledForSubjectCompat:
+          prepared.deviceAuthForcedOff,
+    );
   }
 
   /// Whether the native library was loaded and the handle is valid.
@@ -3258,5 +3296,34 @@ enum LabReenqueueResult {
       default:
         return LabReenqueueResult.parseError;
     }
+  }
+}
+
+/// Result of one `synheart_core_new` call: the handle address (0 on failure)
+/// and the runtime's last-error message. Plain values, so it crosses isolates.
+typedef _CoreNewResult = ({int address, String? error});
+
+/// Calls `synheart_core_new` for [configJson]. Top-level and capture-free so
+/// [CoreRuntimeBridge.createAsync] can run it on a background isolate; the
+/// last-error read happens here too, on the thread that made the call.
+_CoreNewResult _coreNewAt(String configJson) {
+  final ffi = SynheartCoreFFI.load();
+  if (ffi == null) return (address: 0, error: 'native library unavailable');
+  final cJson = configJson.toNativeUtf8();
+  try {
+    final handle = ffi.coreNew(cJson.cast());
+    if (handle != nullptr) return (address: handle.address, error: null);
+    String? reason;
+    final lastErr = ffi.coreLastError;
+    if (lastErr != null) {
+      final p = lastErr();
+      if (p != nullptr) {
+        reason = p.toDartString();
+        ffi.coreFreeString(p);
+      }
+    }
+    return (address: 0, error: reason);
+  } finally {
+    malloc.free(cJson);
   }
 }

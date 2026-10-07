@@ -1334,6 +1334,10 @@ class Synheart {
       }
       final dataDir = await _resolveDataDir();
       final coreJson = buildRuntimeConfigMap(resolvedCfg, dataDir: dataDir);
+      // Deliberately synchronous: [CoreRuntimeBridge.createAsync] was tried
+      // here and made startup worse on a Galaxy A23 - background isolates
+      // queue rather than run in parallel there, so the create waited behind
+      // the host's HSI decode isolate and ran past the host's 8 s init timeout.
       _coreRuntime = CoreRuntimeBridge.create(coreJson);
       // Now safe to register the logging callback — coreNew has returned.
       final logRc = CoreRuntimeBridge.initRuntimeLogging(
