@@ -32,6 +32,24 @@ class RuntimeCompat {
   static const int requiredAbiMajor = 1;
   static const int requiredAbiMinor = 0;
 
+  /// Newest ABI major the bindings also accept. ABI 2.0 only removed symbols
+  /// these bindings never call, and its one addition
+  /// (`synheart_core_last_error_json`) is looked up as optional, so runtimes on
+  /// either major load. Raise it only after checking a new major's removals
+  /// against the bindings.
+  static const int maxAbiMajor = 2;
+
+  /// The accepted ABI range, for messages.
+  static String get abiRange => maxAbiMajor == requiredAbiMajor
+      ? '$requiredAbiMajor.x'
+      : '$requiredAbi to $maxAbiMajor.x';
+
+  /// Whether a runtime reporting [abi] can be used.
+  static bool acceptsAbi(({int major, int minor}) abi) {
+    if (abi.major < requiredAbiMajor || abi.major > maxAbiMajor) return false;
+    return abi.major > requiredAbiMajor || abi.minor >= requiredAbiMinor;
+  }
+
   /// Installs the release the bindings were written against.
   static const String installCommand =
       'synheart install runtime --version $writtenAgainst';
@@ -72,9 +90,7 @@ class RuntimeCompat {
     final rawAbi = buildInfo?['abi'];
     final parsedAbi = rawAbi is String ? parseAbi(rawAbi) : null;
     final abi = parsedAbi == null ? null : (rawAbi as String);
-    if (parsedAbi != null &&
-        (parsedAbi.major != requiredAbiMajor ||
-            parsedAbi.minor < requiredAbiMinor)) {
+    if (parsedAbi != null && !acceptsAbi(parsedAbi)) {
       return RuntimeCompatResult(
         version: version,
         abi: abi,
@@ -82,7 +98,7 @@ class RuntimeCompat {
         message:
             'Core runtime ${version ?? '(unknown version)'} (ABI $abi) is '
             'incompatible with synheart_core $synheartCoreVersion (needs ABI '
-            '$requiredAbiMajor.x). $_fix',
+            '$abiRange). $_fix',
       );
     }
     if (version == null) {
@@ -139,8 +155,7 @@ enum RuntimeCompatStatus {
   /// initialisation is refused.
   tooOld,
 
-  /// The runtime's ABI major differs from [RuntimeCompat.requiredAbiMajor] or
-  /// its minor is below [RuntimeCompat.requiredAbiMinor]; initialisation is
+  /// The runtime's ABI is outside [RuntimeCompat.abiRange]; initialisation is
   /// refused.
   incompatibleAbi,
 

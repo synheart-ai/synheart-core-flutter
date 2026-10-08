@@ -69,7 +69,7 @@ class SynheartRuntimeException implements Exception {
     final message = switch (kind) {
       SynheartRuntimeErrorKind.notInstalled =>
         'Core runtime not found. synheart_core needs runtime ABI '
-            '${RuntimeCompat.requiredAbiMajor}.x. $fix',
+            '${RuntimeCompat.abiRange}. $fix',
       SynheartRuntimeErrorKind.wrongArchitecture =>
         'Core runtime was built for a different CPU architecture than this '
             'device. $fix',
