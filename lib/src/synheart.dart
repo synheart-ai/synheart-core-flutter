@@ -50,6 +50,7 @@ import 'config/activation_manager.dart';
 import 'modules/cloud/device_auth_provider.dart';
 import 'core_runtime/core_runtime_bridge.dart';
 import 'core_runtime/runtime_compat.dart';
+import 'core_runtime/runtime_exception.dart';
 import 'core_runtime/ffi_bindings.dart' show SynheartCoreFFI;
 import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
 import 'sync/sync_readiness.dart';
@@ -1334,11 +1335,37 @@ class Synheart {
       }
       final dataDir = await _resolveDataDir();
       final coreJson = buildRuntimeConfigMap(resolvedCfg, dataDir: dataDir);
+      runtimeError = null;
+      // Host rule: load the library and check its handle-less build info
+      // BEFORE synheart_core_new, so an incompatible runtime never gets a
+      // handle (or runs its init) at all.
+      if (SynheartCoreFFI.load() != null) {
+        final Map<String, dynamic>? info;
+        try {
+          info = CoreRuntimeBridge.buildInfo();
+        } on ArgumentError catch (e) {
+          // The library loaded but lacks synheart_core_build_info, so nothing
+          // else it exports can be trusted either.
+          throw SynheartRuntimeException.unidentified(cause: '$e');
+        }
+        final compat = RuntimeCompat.check(info);
+        runtimeCompatibility = compat;
+        SynheartLogger.log(compat.message);
+        if (!compat.isAcceptable) {
+          throw SynheartRuntimeException.incompatible(compat);
+        }
+      }
       // Deliberately synchronous: [CoreRuntimeBridge.createAsync] was tried
       // here and made startup worse on a Galaxy A23 - background isolates
       // queue rather than run in parallel there, so the create waited behind
       // the host's HSI decode isolate and ran past the host's 8 s init timeout.
       _coreRuntime = CoreRuntimeBridge.create(coreJson);
+      if (_coreRuntime == null) {
+        // Degraded init is intentional (apps and tests run without a native
+        // library), but the developer needs the reason, not a generic warning.
+        // Logged once, by the degraded-init warning below.
+        runtimeError = SynheartCoreFFI.lastLoadFailure?.toException();
+      }
       // Now safe to register the logging callback — coreNew has returned.
       final logRc = CoreRuntimeBridge.initRuntimeLogging(
         envFilter: effRuntimeFilter,
@@ -1351,16 +1378,6 @@ class Synheart {
       }
       if (_coreRuntime != null) {
         SynheartLogger.log('[Synheart] core runtime bridge loaded');
-        // Version gate. The C ABI is additive, so an old vendored library
-        // links fine and diverges silently; this is where it becomes visible.
-        final compat = RuntimeCompat.check(CoreRuntimeBridge.buildInfo());
-        runtimeCompatibility = compat;
-        SynheartLogger.log(compat.message);
-        if (!compat.isAcceptable) {
-          _coreRuntime?.dispose();
-          _coreRuntime = null;
-          throw StateError(compat.message);
-        }
         // Capture the canonical subject the runtime resolved (device-auth
         // derive may have changed it) so Dart-side subject checks match native.
         _syncSubjectFromNative();
@@ -1422,6 +1439,12 @@ class Synheart {
           }
         }
       }
+    } on SynheartRuntimeException {
+      // An incompatible runtime is a build-setup error the app must see, not
+      // a degraded mode to continue in.
+      _coreRuntime = null;
+      _clearBaselineCloudHooks();
+      rethrow;
     } catch (e) {
       SynheartLogger.log('[Synheart] core runtime bridge unavailable: $e');
       _coreRuntime = null;
@@ -1523,9 +1546,12 @@ class Synheart {
 
       if (_coreRuntime == null) {
         SynheartLogger.log(
-          '[Synheart] WARNING: Native runtime (libsynheart_core_runtime) not loaded — '
-          'no HSI will be produced. Ensure native library is bundled '
-          'and do a clean build (flutter clean && flutter run).',
+          runtimeError == null
+              ? '[Synheart] WARNING: Native runtime (libsynheart_core_runtime) '
+                    'not loaded — no HSI will be produced. Ensure the native '
+                    'library is bundled for this platform.'
+              : '[Synheart] WARNING: no HSI will be produced. '
+                    '${runtimeError!.message}',
         );
       } else {
         SynheartLogger.log(
@@ -1851,14 +1877,26 @@ class Synheart {
       // the Dart-only path below would mint a `core_<millis>` handle and report
       // `collecting` for a session the runtime never opened — no native
       // windowing, no HSI, no stored artifacts, and no error to explain it.
+      // Name the runtime's own verdict when it gave one, instead of guessing.
+      // Still a StateError, so existing handlers keep catching it; the
+      // structured form is on [lastNativeError].
+      final native = _coreRuntime!.lastError;
+      final cause = native != null && native.op == 'synheart_core_start_session'
+          ? 'The runtime reported ${native.code}: '
+                '${native.hint ?? native.message} '
+                '(recovery: ${native.recovery ?? 'unknown'}'
+                '${native.recoveryCall != null ? ', call ${native.recoveryCall}' : ''}'
+                '${native.errorId != null ? ', error_id ${native.errorId}' : ''}). '
+                'Synheart.lastNativeError has the structured error.'
+          : 'Most often the runtime already holds an open session: call '
+                'stopSession() before starting another. Check '
+                'runtimeDiagnostics() for symbol or configuration problems.';
       throw StateError(
         'The native session failed to start.\n\n'
         'The runtime is loaded but returned no session, so nothing would be '
         'collected. This is not the local-only path — that applies only when no '
         'native runtime is present.\n\n'
-        'Most often the runtime already holds an open session: call stopSession() '
-        'before starting another. Check runtimeDiagnostics() for symbol or '
-        'configuration problems.',
+        '$cause',
       );
     }
     await shared._startDataCollection(durationSec: durationSec);
@@ -5674,6 +5712,10 @@ class Synheart {
   ///   "nothing checked", not "all good". Pass `probeAll: true` to force a full
   ///   audit first.
   ///
+  /// - `runtimeError` (`Map?`) — why the runtime is unavailable, or `null`
+  ///   when it loaded: `kind` (a `SynheartRuntimeErrorKind` name), `message`
+  ///   (what to do) and `cause` (raw loader text, for support).
+  ///
   /// The `lastQuality` key was removed in 0.10.2 — it read a native symbol
   /// (`synheart_core_last_quality`) that the runtime has never exported
   /// outside the edge/watch variant, so it always reported `0.0`.
@@ -5691,6 +5733,13 @@ class Synheart {
       'missingSymbols': SynheartCoreFFI.missingSymbols.toList(growable: false)
         ..sort(),
       'probedSymbols': SynheartCoreFFI.probedSymbolCount,
+      'runtimeError': runtimeError == null
+          ? null
+          : {
+              'kind': runtimeError!.kind.name,
+              'message': runtimeError!.message,
+              'cause': runtimeError!.cause,
+            },
     };
   }
 
@@ -5702,6 +5751,23 @@ class Synheart {
   /// runtime's version against [RuntimeCompat.writtenAgainst] /
   /// [RuntimeCompat.minimum]. Null before initialisation.
   static RuntimeCompatResult? runtimeCompatibility;
+
+  /// Why the native runtime is unavailable, or null when it loaded (or before
+  /// initialisation). Set for a missing, wrong-architecture or unloadable
+  /// runtime, where init completes without HSI; an incompatible runtime is
+  /// thrown from `initialize` instead.
+  static SynheartRuntimeException? runtimeError;
+
+  /// The structured error from the most recent native runtime call that
+  /// failed, or null when none has failed (or the runtime is older than ABI
+  /// 2.0 and reports none).
+  ///
+  /// Read it right after an SDK call returns `false`, `null` or a failure
+  /// code. Check [SynheartNativeError.op] to confirm it belongs to that call;
+  /// branch on [SynheartNativeError.code] and
+  /// [SynheartNativeError.recoveryKind]; show [SynheartNativeError.message];
+  /// log [SynheartNativeError.errorId].
+  static SynheartNativeError? get lastNativeError => _coreRuntime?.lastError;
 
   /// True when HSI frames are delivered by polling the runtime's ring buffer
   /// (runtime ≥ 0.31.1) rather than through a native callback. Buffered

@@ -123,6 +123,12 @@ synheart install runtime
 synheart install syni     # required on iOS, see below
 ```
 
+`synheart_core` requires runtime ABI 1.x (`RuntimeCompat.requiredAbi`). The
+requirement is also published in the package as `synheart_runtime.json`, which
+the CLI reads to validate a project. If the runtime is missing or does not fit,
+the SDK reports a `SynheartRuntimeException`; see
+[Runtime errors](#runtime-errors).
+
 CLI setup in full, including platform notes and alternatives to the install
 script: <https://docs.synheart.ai/setup/install-cli>
 
@@ -1187,14 +1193,44 @@ synheart install runtime   # or: synheart sync
 The list fills lazily — a symbol is probed the first time the feature that
 needs it is used — so check it after exercising the features you depend on.
 
-If `isAvailable` is false, confirm the runtime was installed for the active
-platform, run a clean build, and inspect native linker output:
+If `isAvailable` is false, read `Synheart.runtimeError` first (below). With no
+reason recorded, confirm the runtime was installed for the active platform, run
+a clean build, and inspect native linker output:
 
 ```bash
 flutter clean
 flutter pub get
 synheart sync
 flutter run
+```
+
+### Runtime errors
+
+`SynheartRuntimeException` reports a native runtime that is missing or does not
+fit this SDK. Its `message` is one sentence naming the versions and the fix;
+`installCommand` is the exact command to run; `cause` is the raw loader text,
+for support requests.
+
+| `kind` | Meaning | What to do |
+|---|---|---|
+| `incompatible` | The runtime loaded but its ABI major differs from `requiredAbi` (or, for runtimes before 0.33.0, its version is below `RuntimeCompat.minimum`), or the library loaded but does not report its version at all. | Run `installCommand`. |
+| `notInstalled` | No runtime library was found for this platform. | Run `installCommand`, then rebuild. |
+| `wrongArchitecture` | A library was found but built for a different CPU architecture (macOS, Linux, Android). | Reinstall for this platform with `installCommand`. |
+| `loadFailed` | The loader rejected the library: a damaged file, or on Windows also a wrong-architecture build (Windows reports both the same way). | Reinstall; if it persists, send `cause` to support. |
+
+`Synheart.initialize` **throws** for `incompatible`. For the other kinds it
+completes without HSI, logs the message once, and exposes the exception as
+`Synheart.runtimeError` (also under `runtimeDiagnostics()['runtimeError']`).
+
+```dart
+try {
+  await Synheart.initialize(config: config);
+} on SynheartRuntimeException catch (e) {
+  print('${e.kind.name}: ${e.message}'); // e.installCommand is the fix
+}
+if (Synheart.runtimeError case final e?) {
+  print('Running without a runtime: ${e.message}');
+}
 ```
 
 ## Threading and blocking calls
