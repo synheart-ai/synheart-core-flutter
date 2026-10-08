@@ -563,9 +563,43 @@ Keyed on what you will actually see.
 | HSI produced, nothing uploads | Cloud gate closed | Check `lastUploadError`; the runtime uploads on its own once the gate opens |
 | `pod install` fails on iOS | `syni` pod's vendored framework missing | `synheart install syni` |
 
+### Read the runtime's own explanation first
+
+When a call returns `false`, `null` or a failure code, the runtime has already
+said why. Read it right after the call:
+
+```dart
+final removed = Synheart.deleteVendorEventsForProvider('garmin');
+final e = Synheart.lastNativeError;      // SynheartNativeError?
+if (removed < 0 && e != null && e.op == 'synheart_core_delete_vendor_events_for_provider') {
+  switch (e.recoveryKind) {
+    case NativeErrorRecovery.grantConsent:  // e.reason names the consent
+    case NativeErrorRecovery.retry:         // honour e.retryAfterMs
+    case NativeErrorRecovery.reportBug:     // send e.errorId + e.report
+    default:
+  }
+  log('${e.code} in ${e.op}: ${e.hint} [${e.errorId}]');
+}
+```
+
+| Field | Use |
+| --- | --- |
+| `code` | Stable; branch on it (`CONSENT_REQUIRED`, `NO_ACTIVE_SESSION`, …) |
+| `recoveryKind` / `recoveryCall` | What to do, and the exact native call that does it |
+| `ownerKind` | Who can fix it: `app`, `user`, `environment`, `service`, `runtime` |
+| `reason`, `argument` | The narrower cause: which consent, which argument and how it was wrong |
+| `message` | End-user copy; show it |
+| `hint` | One developer sentence; log it, never parse it |
+| `errorId` | Matches the native log line; quote it in bug reports |
+
+Sync calls still throw `SyncNativeException`, which is a
+`SynheartNativeException` carrying the same `SynheartNativeError`, so one
+`catch` handles both. `lastNativeError` is null on runtimes older than ABI 2.0.
+
 ### Checklist before filing a bug
 
 ```dart
+Synheart.lastNativeError;               // code, recovery, errorId of the last failure
 Synheart.runtimeDiagnostics();          // isAvailable, missingSymbols
 Synheart.consentEffectiveStateTyped();  // what the user actually has
 await Synheart.hasConsent('cloudUpload');  // whether it is enforceable

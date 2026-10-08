@@ -897,19 +897,7 @@ class SynheartCoreFFI {
       >('synheart_core_init_logging');
 
   // Logging lifecycle FFI (runtime ≥ 5.2.1). Required: every shipped
-  // runtime artifact exports these alongside `synheart_core_init_logging`.
-  late final setLogCallback = _lib
-      .lookupFunction<
-        Int32 Function(
-          Pointer<NativeFunction<Void Function(Pointer<Utf8>, Pointer<Void>)>>?,
-          Pointer<Void>,
-        ),
-        int Function(
-          Pointer<NativeFunction<Void Function(Pointer<Utf8>, Pointer<Void>)>>?,
-          Pointer<Void>,
-        )
-      >('synheart_core_set_log_callback');
-
+  // runtime artifact exports this alongside `synheart_core_init_logging`.
   late final shutdownLogging = _lib
       .lookupFunction<Int32 Function(), int Function()>(
         'synheart_core_shutdown_logging',
@@ -960,6 +948,21 @@ class SynheartCoreFFI {
     () =>
         _lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
           'synheart_core_last_error',
+        ),
+  );
+
+  /// The structured error for the last failed call on the calling OS thread,
+  /// as JSON, or null when that call succeeded. Null itself (not a function)
+  /// on runtimes older than ABI 2.0, which do not export it.
+  ///
+  /// Per OS thread: read it in the same synchronous step as the failing call,
+  /// on the same isolate. Caller MUST free a non-null result via
+  /// [coreFreeString].
+  late final coreLastErrorJson = _optional(
+    'synheart_core_last_error_json',
+    () =>
+        _lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
+          'synheart_core_last_error_json',
         ),
   );
 

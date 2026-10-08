@@ -1873,14 +1873,26 @@ class Synheart {
       // the Dart-only path below would mint a `core_<millis>` handle and report
       // `collecting` for a session the runtime never opened — no native
       // windowing, no HSI, no stored artifacts, and no error to explain it.
+      // Name the runtime's own verdict when it gave one, instead of guessing.
+      // Still a StateError, so existing handlers keep catching it; the
+      // structured form is on [lastNativeError].
+      final native = _coreRuntime!.lastError;
+      final cause = native != null && native.op == 'synheart_core_start_session'
+          ? 'The runtime reported ${native.code}: '
+                '${native.hint ?? native.message} '
+                '(recovery: ${native.recovery ?? 'unknown'}'
+                '${native.recoveryCall != null ? ', call ${native.recoveryCall}' : ''}'
+                '${native.errorId != null ? ', error_id ${native.errorId}' : ''}). '
+                'Synheart.lastNativeError has the structured error.'
+          : 'Most often the runtime already holds an open session: call '
+                'stopSession() before starting another. Check '
+                'runtimeDiagnostics() for symbol or configuration problems.';
       throw StateError(
         'The native session failed to start.\n\n'
         'The runtime is loaded but returned no session, so nothing would be '
         'collected. This is not the local-only path — that applies only when no '
         'native runtime is present.\n\n'
-        'Most often the runtime already holds an open session: call stopSession() '
-        'before starting another. Check runtimeDiagnostics() for symbol or '
-        'configuration problems.',
+        '$cause',
       );
     }
     await shared._startDataCollection(durationSec: durationSec);
@@ -5741,6 +5753,17 @@ class Synheart {
   /// runtime, where init completes without HSI; an incompatible runtime is
   /// thrown from `initialize` instead.
   static SynheartRuntimeException? runtimeError;
+
+  /// The structured error from the most recent native runtime call that
+  /// failed, or null when none has failed (or the runtime is older than ABI
+  /// 2.0 and reports none).
+  ///
+  /// Read it right after an SDK call returns `false`, `null` or a failure
+  /// code. Check [SynheartNativeError.op] to confirm it belongs to that call;
+  /// branch on [SynheartNativeError.code] and
+  /// [SynheartNativeError.recoveryKind]; show [SynheartNativeError.message];
+  /// log [SynheartNativeError.errorId].
+  static SynheartNativeError? get lastNativeError => _coreRuntime?.lastError;
 
   /// True when HSI frames are delivered by polling the runtime's ring buffer
   /// (runtime ≥ 0.31.1) rather than through a native callback. Buffered

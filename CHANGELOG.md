@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING (behavior): `Synheart.initialize` now throws
   `SynheartRuntimeException` (`kind: incompatible`) for an incompatible
-  runtime.** An ABI major other than 1, or a runtime below 0.20.0 that reports
+  runtime.** An ABI outside 1.0–2.x, or a runtime below 0.20.0 that reports
   no ABI, used to be logged as "core runtime bridge unavailable" while init
   carried on without HSI. Migration: run the command in
   `exception.installCommand` (`synheart install runtime --version <ver>`), or
@@ -27,6 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `flutter clean`; it prints the specific reason and the install command.
 
 ### Added
+
+- **Every runtime failure explains itself.** `Synheart.lastNativeError`
+  returns a `SynheartNativeError` for the most recent failed native call:
+  `code`, `message`, `retryable`, plus `ownerKind`
+  (`NativeErrorOwner`), `recoveryKind` (`NativeErrorRecovery`),
+  `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId` and `report`.
+  It is read in the same isolate as the failing call, including calls the
+  bridge runs on a background isolate. Requires a runtime with ABI 2.0
+  (`synheart_core_last_error_json`); on older runtimes it stays null.
+- **`SynheartNativeException`**, the base of `SyncNativeException`, so one
+  `catch` handles every structured runtime failure. `SyncNativeError` is now a
+  typedef of `SynheartNativeError`; existing code compiles unchanged.
+- **`CoreRuntimeBridge.lastCreateError`** says why the runtime handle could not
+  be created (for example `CONFIGURATION_INVALID`).
+- `startSession()`'s "native session failed to start" error now names the
+  runtime's code, hint, recovery and error id instead of guessing the cause.
+- **Runtime ABI 2.x is accepted** alongside 1.x (`RuntimeCompat.maxAbiMajor`):
+  ABI 2.0 removed only symbols these bindings never call.
+
+### Removed
+
+- The unused binding for `synheart_core_set_log_callback`, which runtime ABI
+  2.0 no longer exports.
+
+### Added (runtime compatibility)
 
 - **`SynheartRuntimeException` and `SynheartRuntimeErrorKind`** (`notInstalled`,
   `wrongArchitecture`, `incompatible`, `loadFailed`), with `message`,

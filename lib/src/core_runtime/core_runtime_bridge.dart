@@ -229,6 +229,42 @@ Map<String, dynamic>? unwrapSyncEnvelope(Map<String, dynamic>? raw) {
   );
 }
 
+/// Read and free the runtime's structured last error for the calling OS
+/// thread, or null when the last call succeeded or the runtime predates
+/// `synheart_core_last_error_json` (ABI 2.0).
+///
+/// Call it in the same synchronous step as the failing call, on the same
+/// isolate: inside an `Isolate.run` body for worker calls. Never throws.
+SynheartNativeError? readNativeLastError(SynheartCoreFFI ffi) {
+  final read = ffi.coreLastErrorJson;
+  if (read == null) return null;
+  try {
+    final json = _readFfiStringAndFree(read(), ffi.coreFreeString);
+    if (json == null) return null;
+    final decoded = jsonDecode(json);
+    return decoded is Map<String, dynamic>
+        ? SynheartNativeError.fromMap(decoded)
+        : SynheartNativeError.unknown();
+  } catch (_) {
+    return SynheartNativeError.unknown();
+  }
+}
+
+/// [readNativeLastError] as a plain map, for returning out of an
+/// `Isolate.run` body (only sendable values cross the boundary).
+Map<String, dynamic>? readNativeLastErrorMap(SynheartCoreFFI ffi) {
+  final read = ffi.coreLastErrorJson;
+  if (read == null) return null;
+  try {
+    final json = _readFfiStringAndFree(read(), ffi.coreFreeString);
+    if (json == null) return null;
+    final decoded = jsonDecode(json);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 void _synheartRuntimeLogTrampoline(Pointer<Utf8> line, Pointer<Void> userData) {
   final free = _synheartRuntimeLogFree;
   if (free == null) return;
@@ -589,6 +625,11 @@ class CoreRuntimeBridge {
 
   /// Create a bridge from a config map. Returns null if the native
   /// library is unavailable or config is invalid.
+  /// Why the most recent [create] returned null: the runtime's structured
+  /// error (`CONFIGURATION_INVALID`, `INVALID_ARGUMENT`, …), or null when it
+  /// succeeded, the library did not load, or the runtime predates ABI 2.0.
+  static SynheartNativeError? lastCreateError;
+
   static CoreRuntimeBridge? create(Map<String, dynamic> config) {
     final ffi = SynheartCoreFFI.load();
     if (ffi == null) return null;
@@ -632,6 +673,7 @@ class CoreRuntimeBridge {
     final cJson = jsonEncode(runtimeConfig).toNativeUtf8();
     try {
       final handle = ffi.coreNew(cJson.cast());
+      lastCreateError = handle == nullptr ? readNativeLastError(ffi) : null;
       if (handle == nullptr) {
         // Pull Rust's last-error message (set by synheart_core_new on every
         // nullptr return). Falls back to a keys/empty dump for older
@@ -713,6 +755,7 @@ class CoreRuntimeBridge {
     }
     final rc = _ffi.sdkFfi.setCryptoCallbacksInvoke(_handle, table);
     if (rc != 0) {
+      _noteFailure();
       calloc.free(table);
       return rc;
     }
@@ -740,7 +783,8 @@ class CoreRuntimeBridge {
     if (setter == null) return -2;
     final triple = PlatformNativeSdkStorageCallbacks.tryResolveTriple();
     if (triple == null) return -3;
-    return setter(_handle, triple.store, triple.load, triple.delete);
+    final rc = setter(_handle, triple.store, triple.load, triple.delete);
+    return _checked(rc, failed: rc != 0);
   }
 
   /// §3 — device registration (attestation). [clientId] is the app user id for this session.
@@ -778,7 +822,7 @@ class CoreRuntimeBridge {
   /// §3 / §5 — JSON snapshot from `synheart_core_sdk_device_auth_status`.
   Map<String, dynamic>? sdkDeviceAuthStatus() {
     if (_disposed || _ffi.sdkFfi.deviceAuthStatus == null) return null;
-    final out = _readAndFree(_ffi.sdkFfi.deviceAuthStatus!(_handle));
+    final out = _readOrNote(_ffi.sdkFfi.deviceAuthStatus!(_handle));
     if (out == null) return null;
     try {
       return jsonDecode(out) as Map<String, dynamic>;
@@ -793,7 +837,7 @@ class CoreRuntimeBridge {
     final m = method.toNativeUtf8();
     final u = absoluteUrl.toNativeUtf8();
     try {
-      return _readAndFree(
+      return _readOrNote(
         _ffi.sdkFfi.buildProofHeader!(_handle, m.cast(), u.cast()),
       );
     } finally {
@@ -853,8 +897,11 @@ class CoreRuntimeBridge {
     return _callJson(() => _ffi.startSession(_handle));
   }
 
-  /// Stop the current session.
-  bool stopSession() => _ffi.stopSession(_handle) == 0;
+  /// Stop the current session. On failure, [lastError] describes it.
+  bool stopSession() {
+    final rc = _ffi.stopSession(_handle);
+    return _checked(rc == 0, failed: rc != 0);
+  }
 
   /// Get the current session as a map, or null.
   Map<String, dynamic>? currentSession() {
@@ -877,7 +924,7 @@ class CoreRuntimeBridge {
   String? runtimeSubjectId() {
     if (_disposed) return null;
     try {
-      return _readAndFree(_ffi.getSubjectId(_handle));
+      return _readOrNote(_ffi.getSubjectId(_handle));
     } catch (_) {
       // Runtime build predates the symbol — degrade softly so subject sync
       // never breaks init; callers fall back to the configured subject.
@@ -894,7 +941,12 @@ class CoreRuntimeBridge {
     if (_disposed) return -1;
     final s = subjectId.toNativeUtf8();
     try {
-      return _ffi.rebindSubjectId(_handle, s.cast(), invalidateToken ? 1 : 0);
+      final rc = _ffi.rebindSubjectId(
+        _handle,
+        s.cast(),
+        invalidateToken ? 1 : 0,
+      );
+      return _checked(rc, failed: rc < 0);
     } catch (_) {
       // Runtime build predates the symbol — degrade softly.
       return -1;
@@ -1075,7 +1127,10 @@ class CoreRuntimeBridge {
   int? pushBehaviorEventJson(String eventJson) {
     final fn = _ffi.pushBehaviorEvent;
     if (fn == null) return null;
-    return _withCString(eventJson, (p) => fn(_handle, p));
+    return _withCString(eventJson, (p) {
+      final rc = fn(_handle, p);
+      return _checked(rc, failed: rc != 0);
+    });
   }
 
   /// Push a foreground-app context event as JSON. Returns `0` on acceptance,
@@ -1094,7 +1149,10 @@ class CoreRuntimeBridge {
   int? pushContextEventJson(String eventJson) {
     final fn = _ffi.pushContextEvent;
     if (fn == null) return null;
-    return _withCString(eventJson, (p) => fn(_handle, p));
+    return _withCString(eventJson, (p) {
+      final rc = fn(_handle, p);
+      return _checked(rc, failed: rc != 0);
+    });
   }
 
   /// Push a GPS-derived ground speed sample in **m/s**.
@@ -1163,7 +1221,10 @@ class CoreRuntimeBridge {
   /// most of the world. The index must strictly advance — a repeat or a
   /// negative returns `ERR_DAILY_DAY_NOT_ADVANCING`. Returns `null` when the
   /// symbol is absent.
-  int? rollDay(int dayIndex) => _ffi.rollDay?.call(_handle, dayIndex);
+  int? rollDay(int dayIndex) {
+    final rc = _ffi.rollDay?.call(_handle, dayIndex);
+    return _checked(rc, failed: rc != null && rc != 0);
+  }
 
   /// Export the per-head session state: Capacity, Mental Fatigue, Stress,
   /// Valence and the context engine.
@@ -1187,13 +1248,13 @@ class CoreRuntimeBridge {
   String? attachStrainScoreJson() {
     final fn = _ffi.attachStrainScoreJson;
     if (fn == null) return null;
-    return _readAndFree(fn(_handle));
+    return _readOrNote(fn(_handle));
   }
 
   String? exportSessionState() {
     final fn = _ffi.exportSessionState;
     if (fn == null) return null;
-    return _readAndFree(fn(_handle));
+    return _readOrNote(fn(_handle));
   }
 
   /// Restore a previously exported session state.
@@ -1205,7 +1266,10 @@ class CoreRuntimeBridge {
   int? loadSessionState(String json) {
     final fn = _ffi.loadSessionState;
     if (fn == null) return null;
-    return _withCString(json, (p) => fn(_handle, p));
+    return _withCString(json, (p) {
+      final rc = fn(_handle, p);
+      return _checked(rc, failed: rc != 0);
+    });
   }
 
   /// The comparability key for anything you cache.
@@ -1217,7 +1281,7 @@ class CoreRuntimeBridge {
   String? configId() {
     final fn = _ffi.configId;
     if (fn == null) return null;
-    return _readAndFree(fn(_handle));
+    return _readOrNote(fn(_handle));
   }
 
   /// The most recent human-state vector as JSON, or `null` before the first
@@ -1276,7 +1340,7 @@ class CoreRuntimeBridge {
   /// first window has completed. Schema mirrors the Synheart Runtime's
   /// `PersonalizationContext` JSON-serialized form.
   String? personalizationContextJson() =>
-      _readAndFree(_ffi.personalizationContextJson(_handle));
+      _readOrNote(_ffi.personalizationContextJson(_handle));
 
   /// Push a longitudinal SRM daily value. Allowed dimensions:
   /// `sleep_need`, `sleep_regularity`, `hrv_rmssd`, `resting_hr`,
@@ -1334,7 +1398,7 @@ class CoreRuntimeBridge {
   /// Returns the serialized `SleepScoreResult` or `null` on parse error.
   String? sleepScoreComputeJson(String inputJson) {
     return _withCString(inputJson, (p) {
-      return _readAndFree(_ffi.sleepScoreComputeJson(_handle, p));
+      return _readOrNote(_ffi.sleepScoreComputeJson(_handle, p));
     });
   }
 
@@ -1343,7 +1407,7 @@ class CoreRuntimeBridge {
   String? sleepScoreComputeJsonTraced(String inputJson, String correlationId) {
     return _withCString(inputJson, (p) {
       return _withCString(correlationId, (cid) {
-        return _readAndFree(_ffi.sleepScoreComputeJsonTraced(_handle, p, cid));
+        return _readOrNote(_ffi.sleepScoreComputeJsonTraced(_handle, p, cid));
       });
     });
   }
@@ -1356,7 +1420,7 @@ class CoreRuntimeBridge {
   /// recovery is forbidden by design), or `null` on parse failure.
   String? recoveryScoreComputeJson(String inputJson) {
     return _withCString(inputJson, (p) {
-      return _readAndFree(_ffi.recoveryScoreComputeJson(_handle, p));
+      return _readOrNote(_ffi.recoveryScoreComputeJson(_handle, p));
     });
   }
 
@@ -1368,7 +1432,7 @@ class CoreRuntimeBridge {
   ) {
     return _withCString(inputJson, (p) {
       return _withCString(correlationId, (cid) {
-        return _readAndFree(
+        return _readOrNote(
           _ffi.recoveryScoreComputeJsonTraced(_handle, p, cid),
         );
       });
@@ -1382,7 +1446,7 @@ class CoreRuntimeBridge {
   /// parse failure / runtime not ready.
   String? readinessScoreComputeJson(String inputJson) {
     return _withCString(inputJson, (p) {
-      return _readAndFree(_ffi.readinessScoreComputeJson(_handle, p));
+      return _readOrNote(_ffi.readinessScoreComputeJson(_handle, p));
     });
   }
 
@@ -1394,7 +1458,7 @@ class CoreRuntimeBridge {
   ) {
     return _withCString(inputJson, (p) {
       return _withCString(correlationId, (cid) {
-        return _readAndFree(
+        return _readOrNote(
           _ffi.readinessScoreComputeJsonTraced(_handle, p, cid),
         );
       });
@@ -1404,10 +1468,10 @@ class CoreRuntimeBridge {
   /// Queue a batch `SleepScoreResult` JSON to ride the next HSI and
   /// feed the Path-B rolling median. Returns `0` on success.
   int attachSleepScoreJson(String resultJson) {
-    return _withCString(
-          resultJson,
-          (p) => _ffi.attachSleepScoreJson(_handle, p),
-        ) ??
+    return _withCString(resultJson, (p) {
+          final rc = _ffi.attachSleepScoreJson(_handle, p);
+          return _checked(rc, failed: rc != 0);
+        }) ??
         -1;
   }
 
@@ -1416,38 +1480,39 @@ class CoreRuntimeBridge {
   /// replaced. Returns `0` on success.
   int attachRecoveryScoreToday(int score) {
     final clamped = score < 0 ? 0 : (score > 255 ? 255 : score);
-    return _ffi.attachRecoveryScoreToday(_handle, clamped);
+    final rc = _ffi.attachRecoveryScoreToday(_handle, clamped);
+    return _checked(rc, failed: rc != 0);
   }
 
   /// Drop today's Recovery Score so personalization Stage 2 reverts to
   /// the per-component composite. Returns `0` on success.
   int clearRecoveryScoreToday() {
-    return _ffi.clearRecoveryScoreToday(_handle);
+    final rc = _ffi.clearRecoveryScoreToday(_handle);
+    return _checked(rc, failed: rc != 0);
   }
 
   /// Get the last **live-head** `SleepScore` JSON
   /// (`rulepack://sleep_autonomic_v1`). Null if no window has completed.
-  String? lastSleepScoreJson() =>
-      _readAndFree(_ffi.lastSleepScoreJson(_handle));
+  String? lastSleepScoreJson() => _readOrNote(_ffi.lastSleepScoreJson(_handle));
 
   /// Export the longitudinal SRM snapshot for cross-launch persistence.
   String? exportLongitudinalSnapshot() =>
-      _readAndFree(_ffi.exportLongitudinalSnapshot(_handle));
+      _readOrNote(_ffi.exportLongitudinalSnapshot(_handle));
 
   /// Restore the longitudinal SRM from a prior snapshot.
   /// Returns the engine error code (0 on success).
   int loadLongitudinalSnapshot(String json) {
-    return _withCString(
-          json,
-          (p) => _ffi.loadLongitudinalSnapshot(_handle, p),
-        ) ??
+    return _withCString(json, (p) {
+          final rc = _ffi.loadLongitudinalSnapshot(_handle, p);
+          return _checked(rc, failed: rc != 0);
+        }) ??
         -1;
   }
 
   /// Get the current wearable reference, including Path-B
   /// `recent_sleep_score_median`. Null if no reference is set.
   String? wearableReferenceJson() =>
-      _readAndFree(_ffi.wearableReferenceJson(_handle));
+      _readOrNote(_ffi.wearableReferenceJson(_handle));
 
   // ── Typed sleep-score bridge API ───────────────────────────────────
 
@@ -1555,22 +1620,24 @@ class CoreRuntimeBridge {
   Future<bool> _consentMutate(String type, {required bool grant}) async {
     if (_disposed) return false;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (ok, err) = await _runFfi<(bool, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return false;
+      if (ffi == null) return (false, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final p = type.toNativeUtf8();
       try {
         final rc = grant
             ? ffi.grantConsent(handle, p.cast())
             : ffi.revokeConsent(handle, p.cast());
-        return rc == 0;
+        return (rc == 0, rc == 0 ? null : readNativeLastErrorMap(ffi));
       } catch (_) {
-        return false;
+        return (false, null);
       } finally {
         malloc.free(p);
       }
     });
+    _noteWorkerError(err);
+    return ok;
   }
 
   bool hasConsent(String type) {
@@ -1585,8 +1652,8 @@ class CoreRuntimeBridge {
     final pBase = baseUrl.toNativeUtf8();
     final pApp = appId.toNativeUtf8();
     try {
-      return _ffi.consentConfigureCloud(_handle, pBase.cast(), pApp.cast()) ==
-          0;
+      final rc = _ffi.consentConfigureCloud(_handle, pBase.cast(), pApp.cast());
+      return _checked(rc == 0, failed: rc != 0);
     } finally {
       malloc.free(pBase);
       malloc.free(pApp);
@@ -1606,9 +1673,12 @@ class CoreRuntimeBridge {
     if (_disposed) return null;
     final handleAddr = _handle.address;
     final payload = jsonEncode(formJson);
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final pDevice = deviceId.toNativeUtf8();
       final pPlatform = platform.toNativeUtf8();
@@ -1622,12 +1692,12 @@ class CoreRuntimeBridge {
           pUser.cast(),
           pForm.cast(),
         );
-        if (ptr == nullptr) return null;
+        if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(pDevice);
         malloc.free(pPlatform);
@@ -1635,6 +1705,8 @@ class CoreRuntimeBridge {
         malloc.free(pForm);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Persist a durable study-consent record via the consent service. [payload]
@@ -1648,26 +1720,31 @@ class CoreRuntimeBridge {
     if (_disposed) return null;
     final handleAddr = _handle.address;
     final encoded = jsonEncode(payload);
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final recordFn = ffi.recordStudyConsent;
       // Older native libs lack this symbol; degrade gracefully.
-      if (recordFn == null) return null;
+      if (recordFn == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final pPayload = encoded.toNativeUtf8();
       try {
         final ptr = recordFn(handle, pPayload.cast());
-        if (ptr == nullptr) return null;
+        if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(pPayload);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Redeem a research-study access + study code, or (when [validateOnly])
@@ -1679,9 +1756,12 @@ class CoreRuntimeBridge {
   }) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final pAccess = accessCode.toNativeUtf8();
       final pStudy = studyCode.toNativeUtf8();
@@ -1689,17 +1769,19 @@ class CoreRuntimeBridge {
         final ptr = validateOnly
             ? ffi.validateStudyCodes(handle, pAccess.cast(), pStudy.cast())
             : ffi.enrolStudy(handle, pAccess.cast(), pStudy.cast());
-        if (ptr == nullptr) return null;
+        if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(pAccess);
         malloc.free(pStudy);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Withdraw from the device's active research study for this app. No codes
@@ -1708,20 +1790,25 @@ class CoreRuntimeBridge {
   Future<Map<String, dynamic>?> withdrawResearchStudy() async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final ptr = ffi.withdrawStudy(handle);
-      if (ptr == nullptr) return null;
+      if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
       try {
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Read the device's CURRENT active research-study enrolment for this app —
@@ -1731,20 +1818,25 @@ class CoreRuntimeBridge {
   Future<Map<String, dynamic>?> researchStudyStatus() async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final ptr = ffi.researchStudyStatus(handle);
-      if (ptr == nullptr) return null;
+      if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
       try {
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Request erasure of the data the participant contributed to their study.
@@ -1755,23 +1847,31 @@ class CoreRuntimeBridge {
   }) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final ptr = ffi.requestStudyDataDeletion(handle, dryRun);
-      if (ptr == nullptr) return null;
+      if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
       try {
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return jsonDecode(raw) as Map<String, dynamic>;
+        return (jsonDecode(raw) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
-  bool consentClearStored() => _ffi.consentClearStored(_handle) == 0;
+  bool consentClearStored() {
+    final rc = _ffi.consentClearStored(_handle);
+    return _checked(rc == 0, failed: rc != 0);
+  }
 
   Map<String, dynamic>? consentStatus() {
     return _callJson(() => _ffi.consentStatus(_handle));
@@ -1790,7 +1890,8 @@ class CoreRuntimeBridge {
     final tj = tokenJson.toNativeUtf8();
     final s = secret.toNativeUtf8();
     try {
-      return _ffi.loadCapabilityToken(_handle, tj.cast(), s.cast()) == 0;
+      final rc = _ffi.loadCapabilityToken(_handle, tj.cast(), s.cast());
+      return _checked(rc == 0, failed: rc != 0);
     } finally {
       malloc.free(tj);
       malloc.free(s);
@@ -1800,14 +1901,14 @@ class CoreRuntimeBridge {
   // ── Queries ──────────────────────────────────────────────────────────
 
   List<dynamic>? listSessions() {
-    final json = _readAndFree(_ffi.listSessions(_handle));
+    final json = _readOrNote(_ffi.listSessions(_handle));
     if (json == null) return null;
     return jsonDecode(json) as List<dynamic>;
   }
 
   String? getSessionSummary(String sessionId) {
     return _withCString(sessionId, (p) {
-      return _readAndFree(_ffi.getSessionSummary(_handle, p));
+      return _readOrNote(_ffi.getSessionSummary(_handle, p));
     });
   }
 
@@ -1818,7 +1919,7 @@ class CoreRuntimeBridge {
     int limit = 0,
   }) {
     return _withCString(sessionId, (p) {
-      final json = _readAndFree(
+      final json = _readOrNote(
         _ffi.getHsiWindows(_handle, p, startMs, endMs, limit),
       );
       if (json == null) return null;
@@ -1872,7 +1973,7 @@ class CoreRuntimeBridge {
     _SyniFfiOperation operation, {
     String? value,
     int limit = 0,
-  }) {
+  }) async {
     if (_disposed) {
       return Future.value(const {
         'error': 'ERR_UNAVAILABLE: Synheart Core runtime is disposed',
@@ -1887,23 +1988,31 @@ class CoreRuntimeBridge {
     }
 
     final handleAddress = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
       if (ffi == null) {
-        return const <String, dynamic>{
-          'error': 'ERR_UNAVAILABLE: Synheart Core runtime is unavailable',
-        };
+        return (
+          const <String, dynamic>{
+            'error': 'ERR_UNAVAILABLE: Synheart Core runtime is unavailable',
+          },
+          null,
+        );
       }
+      Map<String, dynamic>? nativeError;
       final handle = Pointer<Void>.fromAddress(handleAddress);
       Pointer<Utf8> output = nullptr;
       Pointer<Utf8>? input;
-      try {
+      Map<String, dynamic> body() {
         switch (operation) {
           case _SyniFfiOperation.chat:
             final call = ffi.syniChat;
             if (call == null) return _syniUnsupportedEnvelope;
-            input = (value ?? '').toNativeUtf8();
-            output = call(handle, input);
+            final inPtr = (value ?? '').toNativeUtf8();
+            input = inPtr;
+            output = call(handle, inPtr);
             break;
           case _SyniFfiOperation.listSessions:
             final call = ffi.syniListSessions;
@@ -1913,24 +2022,28 @@ class CoreRuntimeBridge {
           case _SyniFfiOperation.getSession:
             final call = ffi.syniGetSession;
             if (call == null) return _syniUnsupportedEnvelope;
-            input = (value ?? '').toNativeUtf8();
-            output = call(handle, input);
+            final inPtr = (value ?? '').toNativeUtf8();
+            input = inPtr;
+            output = call(handle, inPtr);
             break;
           case _SyniFfiOperation.getSessionMessages:
             final call = ffi.syniGetSessionMessages;
             if (call == null) return _syniUnsupportedEnvelope;
-            input = (value ?? '').toNativeUtf8();
-            output = call(handle, input, limit);
+            final inPtr = (value ?? '').toNativeUtf8();
+            input = inPtr;
+            output = call(handle, inPtr, limit);
             break;
           case _SyniFfiOperation.closeSession:
             final call = ffi.syniCloseSession;
             if (call == null) return _syniUnsupportedEnvelope;
-            input = (value ?? '').toNativeUtf8();
-            output = call(handle, input);
+            final inPtr = (value ?? '').toNativeUtf8();
+            input = inPtr;
+            output = call(handle, inPtr);
             break;
         }
 
         if (output == nullptr) {
+          nativeError = readNativeLastErrorMap(ffi);
           return const <String, dynamic>{
             'error': 'ERR_NETWORK: Syni service returned an empty response',
           };
@@ -1941,43 +2054,66 @@ class CoreRuntimeBridge {
         return <String, dynamic>{
           'error': 'ERR_NETWORK: Syni service returned non-object JSON',
         };
+      }
+
+      try {
+        final result = body();
+        return (result, nativeError);
       } catch (error) {
-        return <String, dynamic>{
-          'error': 'ERR_NETWORK: Syni service call failed: $error',
-        };
+        return (
+          <String, dynamic>{
+            'error': 'ERR_NETWORK: Syni service call failed: $error',
+          },
+          null,
+        );
       } finally {
-        if (input != null) malloc.free(input);
+        final inputPtr = input;
+        if (inputPtr != null) malloc.free(inputPtr);
         if (output != nullptr) ffi.coreFreeString(output);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   // ── Metrics ──────────────────────────────────────────────────────────
 
   bool recordMetric(Map<String, dynamic> event) {
     final json = jsonEncode(event);
-    return _withCString(json, (p) => _ffi.recordMetric(_handle, p) == 0);
+    return _withCString(json, (p) {
+      final rc = _ffi.recordMetric(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   // ── Deletion ─────────────────────────────────────────────────────────
 
   bool deleteSession(String sessionId) {
-    return _withCString(sessionId, (p) => _ffi.deleteSession(_handle, p) == 0);
+    return _withCString(sessionId, (p) {
+      final rc = _ffi.deleteSession(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   /// Mark a stranded `state='active'` session as closed. Returns true on
   /// success (or when the session was already closed). Used by startup
   /// orphan-session sweeps.
   bool closeOrphanSession(String sessionId) {
-    return _withCString(
-      sessionId,
-      (p) => _ffi.closeOrphanSession(_handle, p) == 0,
-    );
+    return _withCString(sessionId, (p) {
+      final rc = _ffi.closeOrphanSession(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
-  bool wipeLocalData() => _ffi.wipeLocalData(_handle) == 0;
+  bool wipeLocalData() {
+    final rc = _ffi.wipeLocalData(_handle);
+    return _checked(rc == 0, failed: rc != 0);
+  }
 
-  int setRetentionDays(int days) => _ffi.setRetentionDays(_handle, days);
+  int setRetentionDays(int days) {
+    final rc = _ffi.setRetentionDays(_handle, days);
+    return _checked(rc, failed: rc < 0);
+  }
 
   // ── Sync ─────────────────────────────────────────────────────────────
 
@@ -2045,7 +2181,12 @@ class CoreRuntimeBridge {
         }
         return null;
       }
-      return unwrapSyncEnvelope(raw);
+      try {
+        return unwrapSyncEnvelope(raw);
+      } on SynheartNativeException catch (e) {
+        _lastError = e.error;
+        rethrow;
+      }
     });
   }
 
@@ -2180,10 +2321,10 @@ class CoreRuntimeBridge {
 
   /// Ingest a canonical vendor event (JSON map from CanonicalWearableEvent.toMap()).
   bool ingestVendorEvent(String eventJson) {
-    return _withCString(
-      eventJson,
-      (p) => _ffi.ingestVendorEvent(_handle, p) == 0,
-    );
+    return _withCString(eventJson, (p) {
+      final rc = _ffi.ingestVendorEvent(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   /// Query stored vendor events. Returns parsed JSON list, or null on error.
@@ -2202,7 +2343,7 @@ class CoreRuntimeBridge {
       'limit': limit,
     });
     return _withCString(query, (p) {
-      final json = _readAndFree(_ffi.queryVendorEvents(_handle, p));
+      final json = _readOrNote(_ffi.queryVendorEvents(_handle, p));
       if (json == null) return null;
       final list = jsonDecode(json) as List<dynamic>;
       // The runtime persists `payload` as a JSON string (see
@@ -2230,7 +2371,7 @@ class CoreRuntimeBridge {
     final pProv = provider.toNativeUtf8();
     final pType = type.toNativeUtf8();
     try {
-      final json = _readAndFree(
+      final json = _readOrNote(
         _ffi.getLatestVendorEvent(_handle, pProv.cast(), pType.cast()),
       );
       if (json == null) return null;
@@ -2253,19 +2394,22 @@ class CoreRuntimeBridge {
 
   /// Delete all vendor events for a provider. Returns deleted count, or -1 on error.
   int deleteVendorEventsForProvider(String provider) {
-    return _withCString(
-      provider,
-      (p) => _ffi.deleteVendorEventsForProvider(_handle, p),
-    );
+    return _withCString(provider, (p) {
+      final rc = _ffi.deleteVendorEventsForProvider(_handle, p);
+      return _checked(rc, failed: rc < 0);
+    });
   }
 
   // ── SRM / Baselines ──────────────────────────────────────────────────
 
-  String? baselinesJson() => _readAndFree(_ffi.baselinesJson(_handle));
-  String? exportSrmSnapshot() => _readAndFree(_ffi.exportSrmSnapshot(_handle));
+  String? baselinesJson() => _readOrNote(_ffi.baselinesJson(_handle));
+  String? exportSrmSnapshot() => _readOrNote(_ffi.exportSrmSnapshot(_handle));
 
   bool loadSrmSnapshot(String json) {
-    return _withCString(json, (p) => _ffi.loadSrmSnapshot(_handle, p) == 0);
+    return _withCString(json, (p) {
+      final rc = _ffi.loadSrmSnapshot(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   Map<String, dynamic>? srmOverallStatus() {
@@ -2301,21 +2445,26 @@ class CoreRuntimeBridge {
   Future<Map<String, dynamic>?> flushUploads() async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       try {
         final ptr = ffi.flushUploads(handle);
-        if (ptr == nullptr) return null;
+        if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
         final decoded = jsonDecode(raw);
-        return decoded is Map<String, dynamic> ? decoded : null;
+        return (decoded is Map<String, dynamic> ? decoded : null, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Cloud ingest health: queue depth, consent readiness, evicted and refused
@@ -2347,7 +2496,7 @@ class CoreRuntimeBridge {
     final sinceMs = since?.millisecondsSinceEpoch ?? 0;
     final lim = (limit ?? 0).clamp(0, 1 << 31);
     final ptr = _ffi.hsiHistoryList(_handle, sinceMs, lim);
-    final raw = _readAndFree(ptr);
+    final raw = _readOrNote(ptr);
     if (raw == null) return const [];
     try {
       final decoded = jsonDecode(raw);
@@ -2378,58 +2527,74 @@ class CoreRuntimeBridge {
     // Guard the symbol lookup + call: a vendored lib that predates this FFI
     // export throws ArgumentError on first `fetchCloudHsi` access. Treat a
     // missing symbol (or any FFI/parse failure) as "no cloud data".
-    return _runFfi(() {
+    final (
+      windows,
+      err,
+    ) = await _runFfi<(List<Map<String, dynamic>>, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return const <Map<String, dynamic>>[];
+      if (ffi == null) return (const <Map<String, dynamic>>[], null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       try {
         final ptr = ffi.fetchCloudHsi(handle, fromMs, toMs);
-        if (ptr == nullptr) return const <Map<String, dynamic>>[];
+        if (ptr == nullptr) {
+          return (const <Map<String, dynamic>>[], readNativeLastErrorMap(ffi));
+        }
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
         final decoded = jsonDecode(raw);
         if (decoded is List) {
-          return decoded.whereType<Map<String, dynamic>>().toList(
-            growable: false,
+          return (
+            decoded.whereType<Map<String, dynamic>>().toList(growable: false),
+            null,
           );
         }
       } catch (_) {}
-      return const <Map<String, dynamic>>[];
+      return (const <Map<String, dynamic>>[], null);
     });
+    _noteWorkerError(err);
+    return windows;
   }
 
   /// Number of archived HSI payloads on-device. Returns `0` on error.
   int hsiHistoryCount() {
     if (_disposed) return 0;
     final n = _ffi.hsiHistoryCount(_handle);
-    return n < 0 ? 0 : n;
+    return _checked(n < 0 ? 0 : n, failed: n < 0);
   }
 
   /// Wipe on-device HSI history. Intended for user-initiated
   /// "delete my data" flows. Returns true on success.
   bool hsiHistoryClear() {
     if (_disposed) return false;
-    return _ffi.hsiHistoryClear(_handle) == 0;
+    final rc = _ffi.hsiHistoryClear(_handle);
+    return _checked(rc == 0, failed: rc != 0);
   }
 
   // ── Wellness Score ───────────────────────────────────────────────────
 
   /// Get the last Wellness Score as JSON, or null if baselines are not ready.
-  String? wellnessJson() => _readAndFree(_ffi.wellnessJson(_handle));
+  String? wellnessJson() => _readOrNote(_ffi.wellnessJson(_handle));
 
   String? lastFeatures() => _readAndFree(_ffi.lastFeatures(_handle));
 
   // ── Diagnostics ──────────────────────────────────────────────────────
 
-  String? diagnostics() => _readAndFree(_ffi.diagnostics(_handle));
+  String? diagnostics() => _readOrNote(_ffi.diagnostics(_handle));
   int get lastErrorCode => _ffi.lastErrorCode(_handle);
   bool get isRuntimeAvailable => _ffi.isRuntimeAvailable(_handle) != 0;
   bool get isNetworkReachable => _ffi.isNetworkReachable(_handle) != 0;
 
   // ── Account ──────────────────────────────────────────────────────────
 
-  bool requestAccountDeletion() => _ffi.requestAccountDeletion(_handle) == 0;
-  bool cancelAccountDeletion() => _ffi.cancelAccountDeletion(_handle) == 0;
+  bool requestAccountDeletion() {
+    final rc = _ffi.requestAccountDeletion(_handle);
+    return _checked(rc == 0, failed: rc != 0);
+  }
+
+  bool cancelAccountDeletion() {
+    final rc = _ffi.cancelAccountDeletion(_handle);
+    return _checked(rc == 0, failed: rc != 0);
+  }
 
   // ── Customer-facing data deletion (GDPR Article 17) ─────────────────
 
@@ -2450,9 +2615,12 @@ class CoreRuntimeBridge {
   }) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final reasonPtr = (reason == null || reason.isEmpty)
           ? nullptr
@@ -2467,17 +2635,19 @@ class CoreRuntimeBridge {
           contactPtr.cast(),
           dryRun,
         );
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
-        return jsonDecode(str) as Map<String, dynamic>;
+        return (jsonDecode(str) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         if (reasonPtr != nullptr) malloc.free(reasonPtr);
         if (contactPtr != nullptr) malloc.free(contactPtr);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Poll the status of a deletion request. `status` transitions through
@@ -2486,23 +2656,28 @@ class CoreRuntimeBridge {
   Future<Map<String, dynamic>?> getDataDeletion(String requestId) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final idPtr = requestId.toNativeUtf8();
       try {
         final resPtr = ffi.getDataDeletion(handle, idPtr.cast());
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
-        return jsonDecode(str) as Map<String, dynamic>;
+        return (jsonDecode(str) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(idPtr);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   // ── Baseline local bridge ──────────────────────────────────────────
@@ -2518,22 +2693,27 @@ class CoreRuntimeBridge {
   Future<Map<String, dynamic>?> baselineHydrateLocal() async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final fn = ffi.baselineHydrateLocal;
-      if (fn == null) return null;
+      if (fn == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       try {
         final resPtr = fn(handle);
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
-        return jsonDecode(str) as Map<String, dynamic>;
+        return (jsonDecode(str) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// Encrypt every cached baseline envelope into a passphrase-keyed
@@ -2544,29 +2724,31 @@ class CoreRuntimeBridge {
   Future<Uint8List?> baselineExportOffline({required String passphrase}) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (blob, err) = await _runFfi<(Uint8List?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final fn = ffi.baselineExportOffline;
-      if (fn == null) return null;
+      if (fn == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final passPtr = passphrase.toNativeUtf8();
       try {
         final resPtr = fn(handle, passPtr.cast());
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
         final decoded = jsonDecode(str) as Map<String, dynamic>;
-        if (decoded['error'] is String) return null;
+        if (decoded['error'] is String) return (null, null);
         final b64 = decoded['blob_b64'] as String?;
-        if (b64 == null) return null;
-        return base64Decode(b64);
+        if (b64 == null) return (null, null);
+        return (base64Decode(b64), null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(passPtr);
       }
     });
+    _noteWorkerError(err);
+    return blob;
   }
 
   /// Decrypt + import a `.srm.synheart` blob into local storage.
@@ -2580,27 +2762,32 @@ class CoreRuntimeBridge {
     if (_disposed) return null;
     final handleAddr = _handle.address;
     final blobB64 = base64Encode(blob);
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final fn = ffi.baselineImportOffline;
-      if (fn == null) return null;
+      if (fn == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final passPtr = passphrase.toNativeUtf8();
       final blobPtr = blobB64.toNativeUtf8();
       try {
         final resPtr = fn(handle, passPtr.cast(), blobPtr.cast());
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
-        return jsonDecode(str) as Map<String, dynamic>;
+        return (jsonDecode(str) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(passPtr);
         malloc.free(blobPtr);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   /// List recent deletion requests for this caller's org. Mostly useful for
@@ -2612,20 +2799,25 @@ class CoreRuntimeBridge {
   }) async {
     if (_disposed) return null;
     final handleAddr = _handle.address;
-    return _runFfi(() {
+    final (
+      result,
+      err,
+    ) = await _runFfi<(Map<String, dynamic>?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
-      if (ffi == null) return null;
+      if (ffi == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       try {
         final resPtr = ffi.listDataDeletions(handle, limit, offset);
-        if (resPtr == nullptr) return null;
+        if (resPtr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final str = resPtr.toDartString();
         ffi.coreFreeString(resPtr);
-        return jsonDecode(str) as Map<String, dynamic>;
+        return (jsonDecode(str) as Map<String, dynamic>, null);
       } catch (_) {
-        return null;
+        return (null, null);
       }
     });
+    _noteWorkerError(err);
+    return result;
   }
 
   // ── Stream (RAMEN vendor sync) ─────────────────────────────────────
@@ -2638,11 +2830,17 @@ class CoreRuntimeBridge {
   /// Optional: `api_key`, `use_tls`, `providers`, `event_types`.
   int startStream(Map<String, dynamic> config) {
     final json = jsonEncode(config);
-    return _withCString(json, (p) => _ffi.streamStart(_handle, p));
+    return _withCString(json, (p) {
+      final rc = _ffi.streamStart(_handle, p);
+      return _checked(rc, failed: rc != 0);
+    });
   }
 
   /// Stop the RAMEN streaming connection.
-  int stopStream() => _ffi.streamStop(_handle);
+  int stopStream() {
+    final rc = _ffi.streamStop(_handle);
+    return _checked(rc, failed: rc != 0);
+  }
 
   /// Register a callback for RAMEN stream events.
   ///
@@ -2690,7 +2888,7 @@ class CoreRuntimeBridge {
   }
 
   /// Get the current stream connection state.
-  String? streamState() => _readAndFree(_ffi.streamState(_handle));
+  String? streamState() => _readOrNote(_ffi.streamState(_handle));
 
   // ── HSI state callback ──────────────────────────────────────────────
 
@@ -2804,7 +3002,10 @@ class CoreRuntimeBridge {
     } catch (_) {
       return false;
     }
-    if (rc != 0) return false;
+    if (rc != 0) {
+      _noteFailure();
+      return false;
+    }
     _hsiBufferedMode = true;
     _hsiSink = onHsi;
     _lastReportedDroppedHsi = 0; // the runtime resets its counter on init
@@ -2893,6 +3094,7 @@ class CoreRuntimeBridge {
     return _withCString(protocolJson, (p) {
       final rc = _ffi.labStart(_handle, p, startedAtMs);
       if (rc == 0) return null;
+      _noteFailure();
       return 'lab_start: error code $rc';
     });
   }
@@ -2908,7 +3110,7 @@ class CoreRuntimeBridge {
     final pType = windowType.toNativeUtf8();
     final pLabel = (label ?? '').toNativeUtf8();
     try {
-      return _readAndFree(
+      return _readOrNote(
         _ffi.labOpenWindow(
           _handle,
           pParent.cast(),
@@ -2926,10 +3128,10 @@ class CoreRuntimeBridge {
 
   /// Close a window in the active lab session.
   bool labCloseWindow(String windowId, int endedAtMs) {
-    return _withCString(
-      windowId,
-      (p) => _ffi.labCloseWindow(_handle, p, endedAtMs) == 0,
-    );
+    return _withCString(windowId, (p) {
+      final rc = _ffi.labCloseWindow(_handle, p, endedAtMs);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   /// Set protocol-specific values on a lab window.
@@ -2937,7 +3139,8 @@ class CoreRuntimeBridge {
     final pId = windowId.toNativeUtf8();
     final pJson = valuesJson.toNativeUtf8();
     try {
-      return _ffi.labSetWindowValues(_handle, pId.cast(), pJson.cast()) == 0;
+      final rc = _ffi.labSetWindowValues(_handle, pId.cast(), pJson.cast());
+      return _checked(rc == 0, failed: rc != 0);
     } finally {
       malloc.free(pId);
       malloc.free(pJson);
@@ -2951,6 +3154,7 @@ class CoreRuntimeBridge {
     return _withCString(patchJson, (p) {
       final rc = _ffi.labMergeExtraData(_handle, p);
       if (rc == 0) return null;
+      _noteFailure();
       return 'lab_merge_extra_data: error code $rc';
     });
   }
@@ -2960,7 +3164,8 @@ class CoreRuntimeBridge {
     final pId = windowId.toNativeUtf8();
     final pJson = overridesJson.toNativeUtf8();
     try {
-      return _ffi.labSetStateOverrides(_handle, pId.cast(), pJson.cast()) == 0;
+      final rc = _ffi.labSetStateOverrides(_handle, pId.cast(), pJson.cast());
+      return _checked(rc == 0, failed: rc != 0);
     } finally {
       malloc.free(pId);
       malloc.free(pJson);
@@ -2969,11 +3174,11 @@ class CoreRuntimeBridge {
 
   /// Finalize the lab session. Returns the complete payload JSON.
   String? labFinalize(int endedAtMs) {
-    return _readAndFree(_ffi.labFinalize(_handle, endedAtMs));
+    return _readOrNote(_ffi.labFinalize(_handle, endedAtMs));
   }
 
   /// Get the last lab export JSON (populated after session end in research mode).
-  String? labExportJson() => _readAndFree(_ffi.labExportJson(_handle));
+  String? labExportJson() => _readOrNote(_ffi.labExportJson(_handle));
 
   /// Whether the runtime exports the lab re-enqueue symbol
   /// (`synheart_core_reenqueue_lab_session`, engine v0.8.1+). Older
@@ -3003,7 +3208,7 @@ class CoreRuntimeBridge {
     final ptr = sessionJson.toNativeUtf8();
     try {
       final code = fn(_handle, ptr);
-      return LabReenqueueResult.fromCode(code);
+      return _checked(LabReenqueueResult.fromCode(code), failed: code != 0);
     } finally {
       malloc.free(ptr);
     }
@@ -3037,7 +3242,7 @@ class CoreRuntimeBridge {
     final pUser = (userInfoJson ?? '').toNativeUtf8();
     final pExtra = (deviceExtraJson ?? '').toNativeUtf8();
     try {
-      return _readAndFree(
+      return _readOrNote(
         fn(
           _handle,
           pDev.cast(),
@@ -3074,15 +3279,15 @@ class CoreRuntimeBridge {
     required String osVersion,
     String? userInfoJson,
     String? deviceExtraJson,
-  }) {
-    if (_disposed) return Future<String?>.value();
+  }) async {
+    if (_disposed) return null;
     final handleAddr = _handle.address;
     final user = userInfoJson ?? '';
     final extra = deviceExtraJson ?? '';
-    return _runFfi(() {
+    final (metaId, err) = await _runFfi<(String?, Map<String, dynamic>?)>(() {
       final ffi = SynheartCoreFFI.load();
       final fn = ffi?.labEnsureMetadata;
-      if (ffi == null || fn == null) return null;
+      if (ffi == null || fn == null) return (null, null);
       final handle = Pointer<Void>.fromAddress(handleAddr);
       final pDev = deviceId.toNativeUtf8();
       final pPlat = platform.toNativeUtf8();
@@ -3098,12 +3303,12 @@ class CoreRuntimeBridge {
           pUser.cast(),
           pExtra.cast(),
         );
-        if (ptr == nullptr) return null;
+        if (ptr == nullptr) return (null, readNativeLastErrorMap(ffi));
         final raw = ptr.toDartString();
         ffi.coreFreeString(ptr);
-        return raw;
+        return (raw, null);
       } catch (_) {
-        return null;
+        return (null, null);
       } finally {
         malloc.free(pDev);
         malloc.free(pPlat);
@@ -3112,6 +3317,8 @@ class CoreRuntimeBridge {
         malloc.free(pExtra);
       }
     });
+    _noteWorkerError(err);
+    return metaId;
   }
 
   /// Mark the cached lab metadata as needing re-upload (profile edit, device
@@ -3120,14 +3327,17 @@ class CoreRuntimeBridge {
   bool labMarkMetadataDirty(String reason) {
     final fn = _ffi.labMarkMetadataDirty;
     if (fn == null) return false;
-    return _withCString(reason, (p) => fn(_handle, p) == 0);
+    return _withCString(reason, (p) {
+      final rc = fn(_handle, p);
+      return _checked(rc == 0, failed: rc != 0);
+    });
   }
 
   /// Cached `meta_id` to stamp on lab sessions, or null if nothing is cached.
   String? labCurrentMetadataId() {
     final fn = _ffi.labCurrentMetadataId;
     if (fn == null) return null;
-    return _readAndFree(fn(_handle));
+    return _readOrNote(fn(_handle));
   }
 
   // ── Build info / Version ────────────────────────────────────────────
@@ -3165,6 +3375,38 @@ class CoreRuntimeBridge {
   // ── Internal helpers ─────────────────────────────────────────────────
 
   /// Read a C string pointer, convert to Dart String, and free it.
+  SynheartNativeError? _lastError;
+
+  /// The structured error from the most recent failed runtime call made
+  /// through this bridge, or null if none has failed yet. Check
+  /// [SynheartNativeError.op] to confirm it belongs to the call you made.
+  SynheartNativeError? get lastError => _lastError;
+
+  /// Record the runtime's last error after a synchronous call reported failure.
+  /// Must run before any other FFI call on this isolate.
+  void _noteFailure() {
+    _lastError = readNativeLastError(_ffi) ?? _lastError;
+  }
+
+  /// Return [result], recording the runtime's last error when [failed].
+  T _checked<T>(T result, {required bool failed}) {
+    if (failed) _noteFailure();
+    return result;
+  }
+
+  /// Record an error map returned from an `Isolate.run` body.
+  void _noteWorkerError(Map<String, dynamic>? error) {
+    if (error != null) _lastError = SynheartNativeError.fromMap(error);
+  }
+
+  /// [_readAndFree], recording the runtime's last error when the pointer is
+  /// null.
+  String? _readOrNote(Pointer<Utf8> ptr) {
+    final str = _readAndFree(ptr);
+    if (str == null) _noteFailure();
+    return str;
+  }
+
   String? _readAndFree(Pointer<Utf8> ptr) {
     if (ptr == nullptr) return null;
     final str = ptr.toDartString();
@@ -3173,9 +3415,16 @@ class CoreRuntimeBridge {
   }
 
   /// Call a function that returns a JSON pointer, parse it as a Map.
+  ///
+  /// A null result also reads the runtime's last error: null is how most
+  /// getters report failure, and also how some report "nothing to return",
+  /// which the runtime tells apart by leaving no error behind.
   Map<String, dynamic>? _callJson(Pointer<Utf8> Function() fn) {
     final json = _readAndFree(fn());
-    if (json == null) return null;
+    if (json == null) {
+      _noteFailure();
+      return null;
+    }
     return jsonDecode(json) as Map<String, dynamic>;
   }
 
@@ -3185,7 +3434,12 @@ class CoreRuntimeBridge {
   /// envelope throws [SyncNativeException], and a legacy bare payload (from an
   /// older vendored native lib) is passed through unchanged.
   Map<String, dynamic>? _callSyncEnvelope(Pointer<Utf8> Function() fn) {
-    return unwrapSyncEnvelope(_callJson(fn));
+    try {
+      return unwrapSyncEnvelope(_callJson(fn));
+    } on SynheartNativeException catch (e) {
+      _lastError = e.error;
+      rethrow;
+    }
   }
 
   /// Allocate a native UTF-8 string, call the function, then free it.
