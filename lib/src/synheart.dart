@@ -1355,6 +1355,10 @@ class Synheart {
           throw SynheartRuntimeException.incompatible(compat);
         }
       }
+      // Deliberately synchronous: [CoreRuntimeBridge.createAsync] was tried
+      // here and made startup worse on a Galaxy A23 - background isolates
+      // queue rather than run in parallel there, so the create waited behind
+      // the host's HSI decode isolate and ran past the host's 8 s init timeout.
       _coreRuntime = CoreRuntimeBridge.create(coreJson);
       if (_coreRuntime == null) {
         // Degraded init is intentional (apps and tests run without a native

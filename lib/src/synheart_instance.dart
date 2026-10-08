@@ -52,7 +52,34 @@ class SynheartInstance {
     required String dataDir,
   }) {
     config.validate();
-    final bridge = CoreRuntimeBridge.create(_buildConfigMap(config, dataDir));
+    return _wire(
+      CoreRuntimeBridge.create(_buildConfigMap(config, dataDir)),
+      config,
+      dataDir,
+    );
+  }
+
+  /// [create], with the blocking native runtime creation on a background
+  /// isolate (see [CoreRuntimeBridge.createAsync]) so it does not freeze the
+  /// host's UI. Wiring - storage and crypto callbacks, device auth - is the
+  /// same and still happens on the calling isolate.
+  static Future<SynheartInstance?> createAsync({
+    required SynheartConfig config,
+    required String dataDir,
+  }) async {
+    config.validate();
+    return _wire(
+      await CoreRuntimeBridge.createAsync(_buildConfigMap(config, dataDir)),
+      config,
+      dataDir,
+    );
+  }
+
+  static SynheartInstance? _wire(
+    CoreRuntimeBridge? bridge,
+    SynheartConfig config,
+    String dataDir,
+  ) {
     if (bridge == null) {
       SynheartLogger.log(
         '[SynheartInstance] core runtime bridge unavailable for '

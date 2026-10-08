@@ -66,6 +66,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`synheart_runtime.json`** at the package root states the required ABI,
   minimum and tested runtime versions for the synheart CLI.
 
+## [0.16.1] - 2026-10-07
+
+### Added
+
+- **`SynheartInstance.createAsync` / `CoreRuntimeBridge.createAsync` - create a
+  runtime without blocking the host's UI.** Native runtime creation (store open
+  and migrations, cloud connector, identity restore) is a blocking call of
+  0.5-1.5 s on a mid-range Android phone, and since Flutter 3.29 the Dart
+  isolate shares the platform main thread, so `create` froze rendering for that
+  long. `createAsync` runs only that call on a background isolate and wires
+  the instance (logging, storage and crypto callbacks) on the calling isolate
+  exactly as `create` does, falling back to an on-thread create if an isolate
+  cannot run. Additive: `create` is unchanged.
+- Not for time-critical creation: on some devices background isolates queue
+  behind other isolate work rather than run in parallel, so wall-clock time can
+  exceed the synchronous call. The personal runtime created by
+  `Synheart.initialize` therefore stays synchronous.
+
+### Changed
+
+- **`synheart_wear` minimum raised to 0.5.1** (`>=0.5.1 <0.6.0`). On iOS the
+  wear source's 1 s heart-rate stream ran every tick as a HealthKit query per
+  metric type over the last 30 days and fed the 30-day mean heart rate in as
+  the current one; 0.5.1 bounds real-time reads to the last 2 minutes, at most
+  every 10 s. The HR samples this module receives on iOS are now recent ones.
+
 ## [0.16.0] - 2026-10-01
 
 ### Added
