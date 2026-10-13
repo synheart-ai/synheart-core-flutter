@@ -108,6 +108,8 @@ class DiagnosticsScreen extends StatelessWidget {
             ],
           ),
 
+          _NativeErrorCard(controller: c),
+
           SectionCard(
             title: 'Local data',
             subtitle:
@@ -156,5 +158,60 @@ class DiagnosticsScreen extends StatelessWidget {
     if (confirmed != true) return;
     await c.wipeLocalData();
     messenger.showSnackBar(const SnackBar(content: Text('Local data wiped.')));
+  }
+}
+
+/// The runtime's structured error for the most recent failed call.
+///
+/// Every field a host needs to act is here without reading a log: `code` to
+/// branch on, `owner` and `recovery` to decide who does what, `recovery_call`
+/// for the exact native fix, and `error_id` to quote in a bug report.
+class _NativeErrorCard extends StatelessWidget {
+  const _NativeErrorCard({required this.controller});
+
+  final SynheartController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = controller.lastNativeError;
+    return SectionCard(
+      title: 'Last native error',
+      subtitle: e == null
+          ? 'No runtime call has failed yet (or the runtime predates ABI 2.0).'
+          : e.message,
+      trailing: StatusPill(
+        e?.code ?? 'none',
+        tone: e == null ? PillTone.good : PillTone.warn,
+      ),
+      children: [
+        if (e != null) ...[
+          KeyValueRow('code', e.code, selectable: true),
+          KeyValueRow('owner', e.owner ?? '—'),
+          KeyValueRow('recovery', e.recovery ?? '—'),
+          KeyValueRow('recovery call', e.recoveryCall ?? '—', selectable: true),
+          if (e.reason != null) KeyValueRow('reason', e.reason!),
+          if (e.argument != null) KeyValueRow('argument', e.argument!),
+          KeyValueRow('op', e.op ?? '—', selectable: true),
+          KeyValueRow('error id', e.errorId ?? '—', selectable: true),
+          KeyValueRow('retryable', '${e.retryable}'),
+          if (e.hint != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 8),
+              child: SelectableText(
+                e.hint!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+        ],
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: controller.probeNativeError,
+            icon: const Icon(Icons.bug_report_outlined),
+            label: const Text('Probe: stop a session that is not running'),
+          ),
+        ),
+      ],
+    );
   }
 }

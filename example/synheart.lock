@@ -2,153 +2,163 @@
   "version": "2",
   "packages": {
     "synheart-core-runtime-lab": {
-      "resolved_version": "v0.19.2",
+      "resolved_version": "v0.38.0",
       "channel": "latest",
+      "abi_version": "2.0",
       "artifacts": {
         "android": [
           {
-            "path": "android/jniLibs/arm64-v8a/libsynheart_core_runtime.so",
-            "sha256": "255d8b612a75a2546639c9f555eb25ec7ca5b70a9dcdc9b3f9c0377e9d92791c"
+            "path": "android/jniLibs/arm64-v8a/libc++_shared.so",
+            "sha256": "f9992c4ba6b7c5a716e3a202fceb1ce029d6a2b0605838ac6b3219f489dd7970"
           },
           {
-            "path": "android/jniLibs/arm64-v8a/libc++_shared.so",
-            "sha256": "8dfbd800f0d4b8ff2b664b0e5012a4a5f08794668dccfaa29b8b1c2cdcdc18b3"
+            "path": "android/jniLibs/armeabi-v7a/libsynheart_core_runtime.so",
+            "sha256": "2ee13fd3d1b6a1f656b2258a107379934f9d89cea746e3837ab12789c9676c49"
+          },
+          {
+            "path": "android/jniLibs/x86_64/libsynheart_core_runtime.so",
+            "sha256": "5bfa86d21da80f0f95da1b255f438dd7d3863a65debfbabfff2640f24b1148b9"
+          },
+          {
+            "path": "android/jniLibs/arm64-v8a/libsynheart_core_runtime.so",
+            "sha256": "41b5b3206506aed6d7bd720e242924a29887bfccad794ac3d33e061b3a07c90e"
           }
         ],
         "ios": [
           {
-            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/SynheartCoreRuntime.framework/Info.plist",
-            "sha256": "c4571659fa3f47bdd4d9d818c6c209a246883d3c4a6b0d615df2c1704c78a0ff"
-          },
-          {
-            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SynheartCoreRuntime.yml",
-            "sha256": "e24e659a187e95cf9daf36f3805b4aafbf1913829be871f762a0d8153b20f161"
-          },
-          {
-            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/DWARF/SynheartCoreRuntime",
-            "sha256": "ed1100cb5d613a47a1f6fdb8ff17c671069873bcb52d94bd351e173b7695c737"
-          },
-          {
             "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Info.plist",
             "sha256": "758a76cd5eeb43e205527af1837b02851ef0dce97d05aa402b8d08f4163139b8"
-          },
-          {
-            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/SynheartCoreRuntime.framework/SynheartCoreRuntime",
-            "sha256": "ace15b2f04fc2628f1ebe61a7760b1910ff688b1ca27a6e6a5dcb25916fbb0bc"
-          },
-          {
-            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/SynheartCoreRuntime.framework/SynheartCoreRuntime",
-            "sha256": "9249c6047da5ddba1331e6d6cba9b10a867fb76c0359dae2c3b2026d526babc7"
           },
           {
             "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/SynheartCoreRuntime.framework/Info.plist",
             "sha256": "6fe4928d7ab3199d5ad0bfeecff9c8da3515edd77a0eed98966f4047ee24d55b"
           },
           {
+            "path": "ios/SynheartCoreRuntime.xcframework/Info.plist",
+            "sha256": "0cca61ffc202d946128188a645beb74b73b213c807345d94da5748c183d473aa"
+          },
+          {
+            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SynheartCoreRuntime.yml",
+            "sha256": "3e42ec0ac68136a2745ff7ccae88d9aed00c7315c5ed952768df6d9927b41aa1"
+          },
+          {
             "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Info.plist",
             "sha256": "758a76cd5eeb43e205527af1837b02851ef0dce97d05aa402b8d08f4163139b8"
           },
           {
-            "path": "ios/SynheartCoreRuntime.xcframework/Info.plist",
-            "sha256": "08135abbb373dbde363512eeb98e5208b1f80cd91fbd145eba8b21cb206d28b6"
+            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/SynheartCoreRuntime.framework/SynheartCoreRuntime",
+            "sha256": "fa279fc4f48d74401229605478e582f61286b760b955ac0b45d19f6d1df52052"
+          },
+          {
+            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/SynheartCoreRuntime.framework/Info.plist",
+            "sha256": "c4571659fa3f47bdd4d9d818c6c209a246883d3c4a6b0d615df2c1704c78a0ff"
+          },
+          {
+            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/SynheartCoreRuntime.framework/SynheartCoreRuntime",
+            "sha256": "6e762660e1330d6739aa35abcc8f355d4a29e4e51291251a507d453e34eb6785"
           },
           {
             "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SynheartCoreRuntime.yml",
-            "sha256": "22ebe06eae91c2f7de113b93e491e61831866bd6fe2b24b8cb8632c78e5842aa"
+            "sha256": "356cfd054393eb215eedaadcd5403efb047e392842170bf689c72f3d88adecb2"
+          },
+          {
+            "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64-simulator/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/DWARF/SynheartCoreRuntime",
+            "sha256": "dcfce9f19af39a6564ca96f1ef26bec65fb9a547ebd39f0b876f5fe67b5ade44"
           },
           {
             "path": "ios/SynheartCoreRuntime.xcframework/ios-arm64/dSYMs/SynheartCoreRuntime.framework.dSYM/Contents/Resources/DWARF/SynheartCoreRuntime",
-            "sha256": "685c038f3a6d563da8ac8ed8d8e1c75f9cdfb7b9097015e44780db3eaf19465f"
+            "sha256": "a651a1a7519d76ffe89a561a410b4d896c6364fc9ad664cd1a0aa68e4198dc38"
           }
         ]
       }
     },
     "syni-runtime": {
-      "resolved_version": "v0.4.4",
+      "resolved_version": "v0.5.0",
       "channel": "latest",
+      "abi_version": "1.0",
       "artifacts": {
         "android": [
           {
-            "path": "android/jniLibs/armeabi-v7a/libsyni_ffi.so",
-            "sha256": "3b96dcd9a320d5ac61b6c631a5446f8f8f3c0593eb72c89019d6f54de278cc1f"
-          },
-          {
             "path": "android/jniLibs/x86_64/libsyni_ffi.so",
-            "sha256": "dfb0e099bb11d7d9f4d5f5292566f2af62102882de33dfe182f793fc0c6dc3a9"
+            "sha256": "0dc2d05ee67aab1b6c3825698a9c01174822ee3f9cee2892dbcbf3e81377b43f"
           },
           {
             "path": "android/jniLibs/arm64-v8a/libsyni_ffi.so",
-            "sha256": "33f8eb3b8c3fccb438c514a0c31abe4d3e030ce0db4e92d9d4b96d36b94a327a"
+            "sha256": "b3ac9d13f36890500c376c217529356f77619874dc179504d5ec9b91178a4ab5"
+          },
+          {
+            "path": "android/vulkan/jniLibs/arm64-v8a/libsyni_ffi.so",
+            "sha256": "2123a9838231396d9d90a3ccb17ab326771d2a4f5876022a5f5ad4caebfb4808"
           }
         ],
         "ios": [
           {
+            "path": "SyniRuntime.xcframework/Info.plist",
+            "sha256": "913492e0e24b29ca271eed9e24453db68165c93b6279155771aee70225d4dfe4"
+          },
+          {
             "path": "SyniRuntime.xcframework/ios-arm64/SyniRuntime.framework/Info.plist",
             "sha256": "91721c3cd25e960261484036db7f702f94bd9f5f58c052a0e433ced6334bcec7"
-          },
-          {
-            "path": "sim/libsyni_ffi.dylib",
-            "sha256": "71521ae1f0442e0f56b8fc90c9c680f5221c3ddfaae1b67f6f9b2bdadb22cbfc"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64/SyniRuntime.framework/SyniRuntime",
-            "sha256": "4e16b36ec12a14503a2eb7be5313458cebd3edb2b214765d427fe6125f74a1c6"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Info.plist",
-            "sha256": "330a0f2d44fc84253e6b40dcb0e9c609240cdbf932858bab794c7793c5d55a9f"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/DWARF/SyniRuntime",
-            "sha256": "06152ac1643f6b23cfc62d157bbb0ac2cef0fbceeda2890f9ab0ca4af111b1f0"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SyniRuntime.yml",
-            "sha256": "0f09310c2ff3026d6cf75920685039967c08980aed98af10f24a48c58ea8777b"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/Headers/syni_ffi.h",
-            "sha256": "76be9c3dd34d5395b1594bfaf3d5aa1f6acd6c558ad71dc26ec28164139c7107"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/Info.plist",
-            "sha256": "382b22bff8e6a46d7277dfc4204d7e01d958a2e40941db7d96428a2922b1d33d"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/SyniRuntime",
-            "sha256": "4ef6de9a9f041685c5affca6c8fdf3a0a54869e5dc3922c395687452c266e130"
           },
           {
             "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Info.plist",
             "sha256": "330a0f2d44fc84253e6b40dcb0e9c609240cdbf932858bab794c7793c5d55a9f"
           },
           {
-            "path": "device/libsyni_ffi.dylib",
-            "sha256": "7a535f116fbea6928a2ec3805ce94ffcd08fe7cb78649e0bfb59b3c3e64bc2ec"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SyniRuntime.yml",
-            "sha256": "b8726f2720371991bcbcbe8ac27658be6fa5f754efefdbb08d98300c585cd65a"
-          },
-          {
-            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/DWARF/SyniRuntime",
-            "sha256": "ea82a011620f4d6e62b4af492052d2c6472d7054fcea3c1582e13c37ba7f26a2"
-          },
-          {
-            "path": "SyniRuntime.xcframework/Info.plist",
-            "sha256": "3230317847f235bcf0ebcb0270c1364ba5384797f82bdff615d6651a070ea7bf"
+            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Info.plist",
+            "sha256": "330a0f2d44fc84253e6b40dcb0e9c609240cdbf932858bab794c7793c5d55a9f"
           },
           {
             "path": "SyniRuntime.xcframework/ios-arm64/SyniRuntime.framework/Headers/syni_ffi.h",
-            "sha256": "76be9c3dd34d5395b1594bfaf3d5aa1f6acd6c558ad71dc26ec28164139c7107"
+            "sha256": "1257633004bd7a3bc249a3ceb8e573301001a9ad19bacd8189516613de5a05f3"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SyniRuntime.yml",
+            "sha256": "c00f325e7dde242908c864a9e502d98b886245a86de1440c01ba375d44e691f9"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/Headers/syni_ffi.h",
+            "sha256": "1257633004bd7a3bc249a3ceb8e573301001a9ad19bacd8189516613de5a05f3"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/Info.plist",
+            "sha256": "382b22bff8e6a46d7277dfc4204d7e01d958a2e40941db7d96428a2922b1d33d"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64/SyniRuntime.framework/SyniRuntime",
+            "sha256": "f1f8832f09eb971b10c2848a5afcc7344d5a751989ef508357facca797d8ddaa"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/Relocations/aarch64/SyniRuntime.yml",
+            "sha256": "bec8de87791b1dcef515bc8f97d8ae1507769b26130bafe915dd4a20d4f10549"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/SyniRuntime.framework/SyniRuntime",
+            "sha256": "89b5eb5e64a96566c9e6abd08cc649f57df69434b402a7ccb6de329864b66a3e"
+          },
+          {
+            "path": "device/libsyni_ffi.dylib",
+            "sha256": "bf5b7bfa2cf8bd44086fc96e3e9f55fef294f8c9e3bfded1581c7bd688b61e06"
+          },
+          {
+            "path": "sim/libsyni_ffi.dylib",
+            "sha256": "b1d1877605cb3467005abf964f760ddf64a849bf03642bdf1ee0b2188fedc7e8"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/DWARF/SyniRuntime",
+            "sha256": "ff2616547b89fb2482d9717e977670babc1f27b767c796a88a802a5deef03cba"
           },
           {
             "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/Relocations/x86_64/SyniRuntime.yml",
-            "sha256": "864f115f2eeb770044a7431f56a22e271fa4f672447e1f65820cdf03adc85f58"
+            "sha256": "9e4ef5228d49c00e05484905d5adb2be4f1ef0bcc517160ecbf98b10a8963326"
+          },
+          {
+            "path": "SyniRuntime.xcframework/ios-arm64_x86_64-simulator/dSYMs/SyniRuntime.framework.dSYM/Contents/Resources/DWARF/SyniRuntime",
+            "sha256": "7f38aff79d5272c69287cd40fcbfae69dc128a3b151cb8fb9fcee8e45ca71cce"
           }
         ]
       }
     }
   },
-  "updated_at": "2026-08-14T11:04:48.909624Z"
+  "updated_at": "2026-10-12T09:30:36.23973Z"
 }

@@ -914,6 +914,20 @@ class SynheartController extends ChangeNotifier {
     await refreshConsent();
   }
 
+  /// The runtime's structured error for the most recent failed call.
+  SynheartNativeError? get lastNativeError => Synheart.lastNativeError;
+
+  /// Trigger a harmless, known failure so the error contract can be seen end
+  /// to end: stopping a session when none is running. The runtime answers
+  /// `NO_ACTIVE_SESSION` and names `synheart_core_start_session` as the fix.
+  /// Does nothing while a session is running, so it never ends a real one.
+  Future<SynheartNativeError?> probeNativeError() async {
+    if (Synheart.isSessionRunning) return lastNativeError;
+    await Synheart.stopSession();
+    notifyListeners();
+    return lastNativeError;
+  }
+
   @override
   void dispose() {
     _hsiSub?.cancel();
