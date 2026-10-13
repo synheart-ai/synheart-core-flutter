@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Install hints now recommend runtime 0.36.0.** The SDK was verified end to
-  end against it, and it is the first recommended release that records its ABI
-  version, so `synheart doctor` can confirm compatibility after installing it.
-  Runtimes from 0.20.0 up to 0.36.0 still initialise; they log as older than
-  the bindings expect.
+- **Install hints now recommend runtime 0.38.0.** The SDK was verified end to
+  end against it on Android and iOS, it records its ABI version (2.0), so
+  `synheart doctor` can confirm compatibility after installing it, and it is
+  the first release with `synheart_core_last_error_json`. Runtimes from 0.20.0
+  up to 0.38.0 still initialise; they log as older than the bindings expect.
 
 - **BREAKING (behavior): `Synheart.initialize` now throws
   `SynheartRuntimeException` (`kind: incompatible`) for an incompatible
@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Earlier runtimes fall back to the version check.
 - **`synheart_runtime.json`** at the package root states the required ABI,
   minimum and tested runtime versions for the synheart CLI.
+  It also carries `abi_max_major` (`2`), the highest ABI major the bindings
+  accept, so a reader of the manifest does not reject a valid ABI 2.x runtime.
+- `CoreRuntimeBridge.lastError` (behind `Synheart.lastNativeError`) describes
+  the most recent call: a call that succeeds clears it, and a failure the
+  runtime did not describe leaves it null rather than keeping an older error.
 
 ## [0.16.1] - 2026-10-07
 
