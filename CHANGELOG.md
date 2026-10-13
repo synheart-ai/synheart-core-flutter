@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Research mode forwards raw phone motion by default.**
+  `SynheartMode.research` and `researchBaseline` now turn on
+  `BehaviorConfig.emitRawMotionSamples`, so the runtime receives measured
+  accelerometer samples without the host opting in. An explicit `true` still
+  enables it in any mode (`SynheartConfig.resolvedEmitRawMotionSamples`).
+- **`PhoneModule`'s collectors no longer emit fabricated data.** Motion, screen
+  state, app switches and notifications came from `Random()` timers; with no
+  real platform source they now emit nothing.
+
 - **Install hints now recommend runtime 0.38.0.** The SDK was verified end to
   end against it on Android and iOS, it records its ABI version (2.0), so
   `synheart doctor` can confirm compatibility after installing it, and it is

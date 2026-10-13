@@ -1522,8 +1522,7 @@ class Synheart {
       _behaviorModule = BehaviorModule(
         consent: _consentModule!,
         enableMotionLite: _config?.behaviorConfig?.enableMotionLite ?? false,
-        emitRawMotionSamples:
-            _config?.behaviorConfig?.emitRawMotionSamples ?? false,
+        emitRawMotionSamples: _config?.resolvedEmitRawMotionSamples ?? false,
       );
 
       _moduleManager.registerModule(
