@@ -3418,33 +3418,45 @@ class CoreRuntimeBridge {
   /// Read a C string pointer, convert to Dart String, and free it.
   SynheartNativeError? _lastError;
 
-  /// The structured error from the most recent failed runtime call made
-  /// through this bridge, or null if none has failed yet. Check
-  /// [SynheartNativeError.op] to confirm it belongs to the call you made.
+  /// The structured error from the most recent runtime call made through
+  /// this bridge, or null when that call succeeded. It describes the latest
+  /// call, not the latest failure: a call that succeeds clears it, so a value
+  /// here never belongs to an earlier, unrelated call. This mirrors the
+  /// runtime, which clears its own per-thread slot on entry to every
+  /// instrumented call. [SynheartNativeError.op] still names the call.
   SynheartNativeError? get lastError => _lastError;
 
   /// Record the runtime's last error after a synchronous call reported failure.
   /// Must run before any other FFI call on this isolate.
+  ///
+  /// Takes only the runtime's fresh error. A failure the runtime did not
+  /// describe (an older runtime without `last_error_json`, or a getter whose
+  /// null means "nothing to return") leaves null, never an older error.
   void _noteFailure() {
-    _lastError = readNativeLastError(_ffi) ?? _lastError;
+    _lastError = readNativeLastError(_ffi);
   }
 
-  /// Return [result], recording the runtime's last error when [failed].
+  /// A call through this bridge succeeded: the last error no longer applies.
+  void _noteSuccess() {
+    _lastError = null;
+  }
+
+  /// Return [result], recording the outcome of the call.
   T _checked<T>(T result, {required bool failed}) {
-    if (failed) _noteFailure();
+    failed ? _noteFailure() : _noteSuccess();
     return result;
   }
 
-  /// Record an error map returned from an `Isolate.run` body.
+  /// Record the outcome of an `Isolate.run` body: its error map, or success.
   void _noteWorkerError(Map<String, dynamic>? error) {
-    if (error != null) _lastError = SynheartNativeError.fromMap(error);
+    _lastError = error == null ? null : SynheartNativeError.fromMap(error);
   }
 
-  /// [_readAndFree], recording the runtime's last error when the pointer is
-  /// null.
+  /// [_readAndFree], recording the outcome: the runtime's last error when the
+  /// pointer is null, success otherwise.
   String? _readOrNote(Pointer<Utf8> ptr) {
     final str = _readAndFree(ptr);
-    if (str == null) _noteFailure();
+    str == null ? _noteFailure() : _noteSuccess();
     return str;
   }
 
@@ -3466,6 +3478,7 @@ class CoreRuntimeBridge {
       _noteFailure();
       return null;
     }
+    _noteSuccess();
     return jsonDecode(json) as Map<String, dynamic>;
   }
 
