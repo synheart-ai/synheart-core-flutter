@@ -28,7 +28,7 @@ dependencies:
   # future breaking major.
   synheart_wear: ">=0.5.1 <0.6.0"
   synheart_session: ^0.3.0
-  synheart_behavior: ^0.4.0
+  synheart_behavior: ^0.4.1
   synheart_auth: ^0.1.7
 
   # FFI for the Synheart Runtime native library
