@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
@@ -277,8 +278,8 @@ class MobileHostRunner {
   /// anything cached under the old key is no longer comparable.
   bool configIdChanged = false;
 
-  /// The most recent `motion.accel_rms` the engine reported, which is what the
-  /// rest detector's low-motion clause reads.
+  /// The most recent `motion.accel_rms` the engine reported: magnitude with
+  /// gravity included, m/s², so a still phone reads about 9.81.
   double? latestAccelRms;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -524,11 +525,19 @@ class MobileHostRunner {
     try {
       final decoded = jsonDecode(featuresJson);
       if (decoded is! Map) return;
-      final motion = decoded['motion'];
-      final rms = motion is Map ? motion['accel_rms'] : null;
-      if (rms is num) {
-        latestAccelRms = rms.toDouble();
-        rest.noteMotionRms(latestAccelRms!);
+      // The engine nests motion under `derived_features`; a top-level read
+      // never finds it and reports "no reading" whatever the accelerometer did.
+      final derived = decoded['derived_features'];
+      final motion = derived is Map ? derived['motion'] : null;
+      if (motion is! Map) return;
+      final rms = motion['accel_rms'];
+      if (rms is num) latestAccelRms = rms.toDouble();
+      // The rest detector's ceiling is gravity-removed, and accel_rms keeps
+      // gravity in. The standard deviation of the magnitude drops the constant
+      // gravity term: about 0 on a desk, 1-3 m/s² walking.
+      final variance = motion['accel_var'];
+      if (variance is num && variance >= 0) {
+        rest.noteMotionRms(math.sqrt(variance.toDouble()));
       }
     } catch (_) {
       // Features are diagnostic; a parse failure changes nothing else.

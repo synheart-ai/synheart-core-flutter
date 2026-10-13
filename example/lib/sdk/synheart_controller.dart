@@ -276,24 +276,16 @@ class SynheartController extends ChangeNotifier {
 
       // phoneConfig is deliberately NOT declared.
       //
-      // Declaring it starts PhoneModule, whose four collectors are `Random()`
-      // generators: motion at 10 Hz, a 30% chance of flipping screen state
-      // every 30 s, a 40% chance of switching to a mock app every 15 s, and a
-      // 30% chance of inventing a notification every 20 s
-      // (`lib/src/modules/phone/phone_collectors.dart`). Cardiac is the only
-      // thing this example is allowed to simulate, and those four are not
-      // cardiac.
+      // Declaring it starts PhoneModule, whose four collectors (motion, screen
+      // state, app focus, notifications) have no real platform source: they
+      // used to emit `Random()` values and now emit nothing
+      // (`lib/src/modules/phone/phone_collectors.dart`). Phone motion reaches
+      // the runtime through the behavior module below, not this one.
       //
-      // It also contradicted the sensing roster: `MobileHostRunner` declares
-      // `screen_state: false` and `app_focus: false` because nothing real
-      // observes them, while the phone module was busy inventing exactly
-      // those two.
-      //
-      // The data never reached the runtime — `phone_module.dart` holds no
-      // bridge reference, so it wrote to an in-memory cache nothing reads —
-      // so nothing of value is lost by leaving it off. The module needs
-      // replacing with real platform collectors or deleting; until then, off
-      // is the honest setting.
+      // The data never reached the runtime either — `phone_module.dart` holds
+      // no bridge reference — so nothing is lost by leaving it off. The module
+      // needs real platform collectors or deleting; until then, off is the
+      // honest setting.
       behaviorConfig: const BehaviorConfig(
         // §4.2 — without this the accel subscription is never created and
         // `push_accel` is never called, so the kinematic modality has no
