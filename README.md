@@ -106,7 +106,7 @@ Or declare the current package line explicitly:
 
 ```yaml
 dependencies:
-  synheart_core: ^0.16.1
+  synheart_core: ^0.17.0
 ```
 
 Then install the native runtimes. The package alone loads no runtime and
