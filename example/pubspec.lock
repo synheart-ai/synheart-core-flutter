@@ -648,10 +648,10 @@ packages:
     dependency: transitive
     description:
       name: synheart_behavior
-      sha256: "63fb09747352471f1cbea755cf464eb4277d6321ed011b5d588746d42db33889"
+      sha256: "7e49823013bbd71ffc51ea20fbfd1996a327c7fdf78cb023695f924bbc7a19ca"
       url: "https://pub.dev"
     source: hosted
-    version: "0.4.0"
+    version: "0.4.1"
   synheart_core:
     dependency: "direct main"
     description:

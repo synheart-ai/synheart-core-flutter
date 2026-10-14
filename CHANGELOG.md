@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PhoneModule`'s collectors no longer emit fabricated data.** Motion, screen
   state, app switches and notifications came from `Random()` timers; with no
   real platform source they now emit nothing.
+- **Requires `synheart_behavior` 0.4.1.** Its Android collector samples the
+  accelerometer at 50 Hz; 0.4.0 used `SENSOR_DELAY_NORMAL` (~5 Hz), a tenth of
+  the rate the motion features are designed for. 0.4.1 also ships an Android
+  manifest that merges a notification listener service and the
+  `BIND_NOTIFICATION_LISTENER_SERVICE` and `READ_PHONE_STATE` permissions into
+  every host; see the `synheart_behavior` 0.4.1 changelog to remove them.
 
 - **Install hints now recommend runtime 0.38.0.** The SDK was verified end to
   end against it on Android and iOS, it records its ABI version (2.0), so
