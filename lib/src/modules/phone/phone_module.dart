@@ -43,7 +43,7 @@ class PhoneModule extends BaseSynheartModule implements RawPhoneDataProvider {
   @override
   Future<void> onInitialize() async {
     SynheartLogger.log('[PhoneModule] Initializing phone collectors...');
-    // Nothing to initialize for mock collectors
+    // The collectors have no platform source; see phone_collectors.dart.
   }
 
   @override

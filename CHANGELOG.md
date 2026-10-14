@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Research mode forwards raw phone motion by default.**
+  `SynheartMode.research` and `researchBaseline` now turn on
+  `BehaviorConfig.emitRawMotionSamples`, so the runtime receives measured
+  accelerometer samples without the host opting in. An explicit `true` still
+  enables it in any mode (`SynheartConfig.resolvedEmitRawMotionSamples`).
+- **`PhoneModule`'s collectors no longer emit fabricated data.** Motion, screen
+  state, app switches and notifications came from `Random()` timers; with no
+  real platform source they now emit nothing.
 - **Requires `synheart_behavior` 0.4.1.** Its Android collector samples the
   accelerometer at 50 Hz; 0.4.0 used `SENSOR_DELAY_NORMAL` (~5 Hz), a tenth of
   the rate the motion features are designed for. 0.4.1 also ships an Android

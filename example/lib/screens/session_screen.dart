@@ -211,13 +211,12 @@ class SessionScreen extends StatelessWidget {
               ),
               _SourceRow(
                 label: 'Phone',
-                // Not enabled, on purpose. PhoneModule's four collectors are
-                // `Random()` generators — motion, screen state, app focus,
-                // notifications — and cardiac is the only thing this example
-                // simulates. They also never reached the runtime: PhoneModule
-                // holds no bridge reference, so it wrote to an in-memory cache
-                // with no reader.
-                detail: 'Not enabled — its collectors emit Random() values',
+                // Not enabled, on purpose. PhoneModule's four collectors —
+                // motion, screen state, app focus, notifications — have no
+                // real platform source and emit nothing (they were `Random()`
+                // generators). They also never reached the runtime:
+                // PhoneModule holds no bridge reference.
+                detail: 'Not enabled — its collectors have no real source yet',
                 active: c.isPhoneCollecting,
                 reachesRuntime: false,
               ),
