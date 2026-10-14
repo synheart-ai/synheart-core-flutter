@@ -229,6 +229,20 @@ class SynheartConfig {
   /// baseline**, and analysis must report it as such. Off by default.
   final bool researchBaseline;
 
+  /// Whether raw accelerometer samples are forwarded to the runtime.
+  ///
+  /// The explicit [BehaviorConfig.emitRawMotionSamples] wins when it is on.
+  /// Research capture ([SynheartMode.research] or [researchBaseline]) turns
+  /// it on as well: without it the runtime receives no motion at all, every
+  /// window reports zero motion energy and an unknown motion state, the
+  /// kinematic heads are never exercised, and no stillness criterion can be
+  /// applied to a rest phase. Outside research capture the default stays off
+  /// for its battery cost.
+  bool get resolvedEmitRawMotionSamples =>
+      (behaviorConfig?.emitRawMotionSamples ?? false) ||
+      mode == SynheartMode.research ||
+      researchBaseline;
+
   /// Inference window length in ms. Null leaves the runtime default (60 000).
   ///
   /// Note `step_ms` is **not** settable through this family — the full

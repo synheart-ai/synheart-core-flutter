@@ -755,11 +755,11 @@ class _NotWiredCard extends StatelessWidget {
           (
             'PhoneModule’s collectors',
             'Not enabled here — buildConfig declares no phoneConfig. The four '
-                'collectors are Random() generators for motion, screen state, '
-                'app focus and notifications, which is why. They never '
-                'reached the runtime either (no bridge reference), so they '
-                'wrote to a cache with no reader. The module needs replacing '
-                'with real platform collectors or deleting.',
+                'collectors (motion, screen state, app focus, notifications) '
+                'used to emit Random() values; they now emit nothing until '
+                'real platform sources replace them. They never reached the '
+                'runtime either (no bridge reference). Phone motion reaches '
+                'the runtime through the behavior module instead.',
           ),
         ])
           Padding(
