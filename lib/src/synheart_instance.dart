@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'core_runtime/core_runtime_bridge.dart';
@@ -9,6 +10,7 @@ import 'models/context_event_input.dart';
 import 'modules/behavior/behavior_code.dart';
 import 'modules/cloud/device_auth_provider.dart';
 import 'core/logger.dart';
+import 'platform/backup_exclusion.dart';
 
 /// A single, self-contained Synheart runtime instance (one native handle).
 ///
@@ -80,6 +82,9 @@ class SynheartInstance {
     SynheartConfig config,
     String dataDir,
   ) {
+    // The runtime owns this directory; keep it out of iOS backup (see
+    // [excludeFromBackup]). Fire-and-forget: the call is best-effort.
+    unawaited(excludeFromBackup(dataDir));
     if (bridge == null) {
       SynheartLogger.log(
         '[SynheartInstance] core runtime bridge unavailable for '
