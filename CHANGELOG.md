@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-15
+
+### Changed
+
+- **Requires `synheart_auth` ^0.1.12** (was ^0.1.7). 0.1.12 recovers an
+  Android secure store restored from a backup or device transfer: the
+  restored store was sealed by a Keystore key the new install doesn't have,
+  so every secure read failed (`AEADBadTagException`) and device
+  registration and storage master key setup kept failing until the app's
+  data was cleared. It also makes `signRequest` sign with the device key the
+  runtime registered. Apps on 0.17.0 could otherwise resolve an older
+  `synheart_auth` without either fix.
+
 ## [0.17.0] - 2026-10-14
 
 ### Changed
