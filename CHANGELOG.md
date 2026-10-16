@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-10-15
+
+### Fixed
+
+- **iOS: the runtime's data directories are excluded from iCloud / iTunes
+  backup and device migration.** Everything in them is sealed with keys held
+  in Keychain items that never leave the device, so a restored copy could
+  never be decrypted. It also brought back the runtime's
+  `.smk-provisioned-<subject>` markers without their key, and the runtime
+  then refused to mint a new storage master key on the new device
+  (`ERR_SECURE_STORAGE_UNAVAILABLE`). The default
+  `Application Support/synheart-core` directory and every
+  `SynheartInstance` data directory are now marked `isExcludedFromBackup`,
+  through a new `ai.synheart.core/platform` method channel on the iOS
+  plugin. Android needs no change here: the app excludes its data with
+  `allowBackup="false"` and `dataExtractionRules`.
+
 ## [0.17.1] - 2026-10-15
 
 ### Changed

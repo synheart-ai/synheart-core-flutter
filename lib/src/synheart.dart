@@ -69,6 +69,7 @@ import 'modules/session/watch_session_module.dart';
 import 'modules/behavior/foreground_app_reporter.dart';
 import 'models/context_event_input.dart';
 import 'package:synheart_session/synheart_session.dart';
+import 'platform/backup_exclusion.dart';
 
 /// Synheart Core SDK - Main Entry Point
 ///
@@ -171,6 +172,7 @@ class Synheart {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
+    await excludeFromBackup(dir.path);
     _resolvedDataDir = dir.path;
     return dir.path;
   }
