@@ -229,6 +229,20 @@ class SynheartConfig {
   /// baseline**, and analysis must report it as such. Off by default.
   final bool researchBaseline;
 
+  /// Enforce consent per channel instead of per category.
+  ///
+  /// With this on, the runtime accepts a sample only when its own channel is
+  /// granted (`phone_context.device_motion` for phone motion,
+  /// `behavior.app_context` for app-context events, and so on) and, when cloud
+  /// consent is configured, present in the verified consent token. The SDK's
+  /// modules ask the runtime the same question before starting a sensor, so a
+  /// sub-channel the user turned off stays off even when its category is on.
+  ///
+  /// Requires a runtime that exports `synheart_core_allows_channel` (C ABI
+  /// 2.1). On an older runtime the modules keep today's category checks.
+  /// Off by default.
+  final bool strictChannelConsent;
+
   /// Whether raw accelerometer samples are forwarded to the runtime.
   ///
   /// The explicit [BehaviorConfig.emitRawMotionSamples] wins when it is on.
@@ -289,6 +303,7 @@ class SynheartConfig {
     this.extraHeads = const <ExtraHead>[],
     this.emitDiagnostics = false,
     this.researchBaseline = false,
+    this.strictChannelConsent = false,
     this.windowMs,
   }) : platform = platform ?? _defaultPlatformId();
 

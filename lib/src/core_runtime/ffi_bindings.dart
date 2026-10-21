@@ -733,6 +733,7 @@ class SynheartCoreFFI {
   void probeOptionalSymbols() {
     // Referencing each field forces its initializer to run.
     coreLastError;
+    allowsChannel;
     recordStudyConsent;
     baselineHydrateLocal;
     baselineExportOffline;
@@ -1190,6 +1191,16 @@ class SynheartCoreFFI {
   );
   late final hasConsent = _lib.lookupFunction<_HasConsentC, _HasConsentDart>(
     'synheart_core_has_consent',
+  );
+
+  /// Whether an ingest push on one consent channel (`biosignals.vitals`, ...)
+  /// is accepted right now: `1` allowed, `0` not (including an unknown channel).
+  /// Null on runtimes older than C ABI 2.1, which do not export it.
+  late final allowsChannel = _optional(
+    'synheart_core_allows_channel',
+    () => _lib.lookupFunction<_HasConsentC, _HasConsentDart>(
+      'synheart_core_allows_channel',
+    ),
   );
   late final currentConsent = _lib
       .lookupFunction<_CurrentConsentC, _CurrentConsentDart>(
