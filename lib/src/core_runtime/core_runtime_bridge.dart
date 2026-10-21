@@ -1685,6 +1685,15 @@ class CoreRuntimeBridge {
     return _withCString(type, (p) => _ffi.hasConsent(_handle, p) != 0);
   }
 
+  /// The runtime's decision for one consent channel (`biosignals.vitals`,
+  /// `phone_context.device_motion`, ...): what an ingest push on it gets right
+  /// now. Null when the loaded runtime predates the call.
+  bool? allowsChannel(String channel) {
+    final fn = _ffi.allowsChannel;
+    if (fn == null) return null;
+    return _withCString(channel, (p) => fn(_handle, p) != 0);
+  }
+
   Map<String, dynamic>? currentConsent() {
     return _callJson(() => _ffi.currentConsent(_handle));
   }

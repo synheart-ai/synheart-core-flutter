@@ -1,1 +1,1 @@
-{"schema": 1, "runtime": {"package": "synheart-core-runtime", "abi": "1.0", "abi_max_major": 2, "minimum": "0.20.0", "written_against": "0.38.0"}}
+{"schema": 1, "runtime": {"package": "synheart-core-runtime", "abi": "1.0", "abi_max_major": 2, "minimum": "0.20.0", "written_against": "0.39.0"}}

@@ -491,6 +491,13 @@ class BehaviorModule extends BaseSynheartModule
             (samples) {
               final push = _pushAccelToRuntime;
               if (push == null) return;
+              // Phone motion is its own channel. With per-channel consent the
+              // runtime would refuse these samples anyway; skip them here.
+              final consent = _consent.current();
+              if (consent.channelsAuthoritative &&
+                  !consent.allowsChannel('phone_context.device_motion')) {
+                return;
+              }
               for (final s in samples) {
                 // `MotionSample` is m/s² with gravity included, and so is the
                 // runtime bridge's accelerometer contract: the bridge converts

@@ -2754,6 +2754,41 @@ class Synheart {
     return result;
   }
 
+  /// Consent channel keys the runtime decides on, as `category.channel`.
+  static const List<String> _runtimeChannels = [
+    'biosignals.vitals',
+    'biosignals.cardio_advanced',
+    'biosignals.neuromuscular',
+    'biosignals.wearable_motion',
+    'biosignals.sleep',
+    'phone_context.device_motion',
+    'phone_context.device_context',
+    'phone_context.system_state',
+    'behavior.digital_activity',
+    'behavior.notification_patterns',
+    'behavior.app_context',
+  ];
+
+  /// The runtime's per-channel decisions, or null to keep category checks:
+  /// when [SynheartConfig.strictChannelConsent] is off, or the loaded runtime
+  /// cannot answer per channel.
+  ConsentChannels? _runtimeChannelDecisions() {
+    if (_config?.strictChannelConsent != true) return null;
+    final runtime = _coreRuntime;
+    if (runtime == null) return null;
+    final nested = <String, Map<String, dynamic>>{};
+    for (final key in _runtimeChannels) {
+      final allowed = runtime.allowsChannel(key);
+      if (allowed == null) return null;
+      final dot = key.indexOf('.');
+      nested.putIfAbsent(
+        key.substring(0, dot),
+        () => {},
+      )[key.substring(dot + 1)] = allowed;
+    }
+    return ConsentChannels.fromJson(nested);
+  }
+
   /// Pull the runtime's effective consent state and push it into the
   /// Dart [ConsentModule] so all consumers that read `_consent.current()`
   /// (modules, observers) see the truth instead of the stale
@@ -2767,6 +2802,7 @@ class Synheart {
     final module = _consentModule;
     if (module == null) return;
     try {
+      final channels = _runtimeChannelDecisions();
       final snapshot = ConsentSnapshot(
         biosignals: effective.biosignals,
         behavior: effective.behavior,
@@ -2776,6 +2812,8 @@ class Synheart {
         vendorSync: effective.vendorSync,
         research: effective.research,
         timestamp: DateTime.now(),
+        channels: channels,
+        channelsAuthoritative: channels != null,
       );
       await module.updateConsent(snapshot);
       SynheartLogger.log(

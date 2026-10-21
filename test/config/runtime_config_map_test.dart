@@ -168,4 +168,18 @@ void main() {
       expect(map['mode'], SynheartMode.personal.name);
     });
   });
+
+  group('strict channel consent', () {
+    test('absent by default', () {
+      final map = buildRuntimeConfigMap(SynheartConfig(appId: 'a'));
+      expect(map.containsKey('strict_channel_consent'), isFalse);
+    });
+
+    test('sent when enabled', () {
+      final map = buildRuntimeConfigMap(
+        SynheartConfig(appId: 'a', strictChannelConsent: true),
+      );
+      expect(map['strict_channel_consent'], isTrue);
+    });
+  });
 }

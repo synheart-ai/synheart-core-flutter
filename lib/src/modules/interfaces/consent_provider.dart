@@ -78,6 +78,13 @@ class ConsentSnapshot {
   /// Nullable for backward compat — when null, module-level booleans are used.
   final ConsentChannels? channels;
 
+  /// Whether [channels] is the runtime's own per-channel decision.
+  ///
+  /// Set when the SDK fills [channels] from the runtime with
+  /// `SynheartConfig.strictChannelConsent` on. [allowsChannel] then reads the
+  /// channel alone and never falls back to the category flag.
+  final bool channelsAuthoritative;
+
   const ConsentSnapshot({
     required this.biosignals,
     required this.behavior,
@@ -91,6 +98,7 @@ class ConsentSnapshot {
     this.explicitlyDenied = false,
     this.tier = ConsentTier.local,
     this.channels,
+    this.channelsAuthoritative = false,
   });
 
   /// Check if a specific consent type is allowed
@@ -120,6 +128,9 @@ class ConsentSnapshot {
   ///
   /// Channel format: "biosignals.vitals", "behavior.digital_activity", etc.
   bool allowsChannel(String channel) {
+    if (channelsAuthoritative && channels != null) {
+      return _checkChannel(channel);
+    }
     // Granular channels take precedence when explicitly set — but if the
     // granular map exists yet reports `false` for a channel whose parent
     // module IS granted, fall back to the module boolean. This catches
@@ -187,6 +198,7 @@ class ConsentSnapshot {
     bool? explicitlyDenied,
     ConsentTier? tier,
     ConsentChannels? channels,
+    bool? channelsAuthoritative,
   }) {
     return ConsentSnapshot(
       biosignals: biosignals ?? this.biosignals,
@@ -201,6 +213,8 @@ class ConsentSnapshot {
       explicitlyDenied: explicitlyDenied ?? this.explicitlyDenied,
       tier: tier ?? this.tier,
       channels: channels ?? this.channels,
+      channelsAuthoritative:
+          channelsAuthoritative ?? this.channelsAuthoritative,
     );
   }
 
@@ -250,6 +264,7 @@ class ConsentSnapshot {
       'explicitlyDenied': explicitlyDenied,
       'tier': tier.name,
       if (channels != null) 'channels': channels!.toJson(),
+      if (channelsAuthoritative) 'channelsAuthoritative': true,
     };
   }
 
@@ -277,6 +292,7 @@ class ConsentSnapshot {
       channels: json['channels'] != null
           ? ConsentChannels.fromJson(json['channels'] as Map<String, dynamic>)
           : null,
+      channelsAuthoritative: json['channelsAuthoritative'] as bool? ?? false,
     );
   }
 }

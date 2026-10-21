@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`SynheartConfig.strictChannelConsent`: consent enforced per channel.**
+  Off by default. With it on, the SDK passes `strict_channel_consent` to the
+  native runtime, which then accepts a sample only when its own consent
+  channel is granted (`phone_context.device_motion` for phone motion,
+  `behavior.app_context` for app-context events, and so on) and, when cloud
+  consent is configured, present in the verified consent token. The SDK's
+  modules read the same per-channel decision from the runtime
+  (`synheart_core_allows_channel`) before starting a sensor, so a channel the
+  user turned off stays off even when its category is on, and phone motion is
+  checked against `phone_context.device_motion`. Needs a runtime with C ABI
+  2.1; on an older runtime the modules keep their category checks.
+
+### Changed
+
+- **Install hints now recommend runtime 0.39.0**, the first release with C ABI
+  2.1 and `synheart_core_allows_channel`. Runtimes from 0.20.0 up to 0.38.x
+  still initialise; they log as older than the bindings expect, and
+  `strictChannelConsent` has no effect on them.
+
 ## [0.17.2] - 2026-10-15
 
 ### Fixed
