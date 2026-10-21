@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checked against `phone_context.device_motion`. Needs a runtime with C ABI
   2.1; on an older runtime the modules keep their category checks.
 
+### Changed
+
+- **Install hints now recommend runtime 0.39.0**, the first release with C ABI
+  2.1 and `synheart_core_allows_channel`. Runtimes from 0.20.0 up to 0.38.x
+  still initialise; they log as older than the bindings expect, and
+  `strictChannelConsent` has no effect on them.
+
 ## [0.17.2] - 2026-10-15
 
 ### Fixed
