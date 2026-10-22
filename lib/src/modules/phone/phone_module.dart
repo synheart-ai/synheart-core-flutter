@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../../core/logger.dart';
+import '../base/runtime_channel_gate.dart';
 import '../base/synheart_module.dart';
 import '../interfaces/capability_provider.dart';
 import '../interfaces/consent_provider.dart';
@@ -11,7 +12,9 @@ import 'phone_cache.dart';
 /// Phone Module
 ///
 /// Captures device-level motion and context signals.
-class PhoneModule extends BaseSynheartModule implements RawPhoneDataProvider {
+class PhoneModule extends BaseSynheartModule
+    with RuntimeChannelGate
+    implements RawPhoneDataProvider {
   @override
   String get moduleId => 'phone';
 
@@ -33,6 +36,11 @@ class PhoneModule extends BaseSynheartModule implements RawPhoneDataProvider {
     required ConsentProvider consent,
   }) : _capabilities = capabilities,
        _consent = consent;
+
+  /// Each collector needs phone-context consent and, with a runtime attached,
+  /// the runtime's acceptance of its own channel.
+  bool _collects(String channel) =>
+      _consent.current().phoneContext && runtimeAllows(channel);
 
   @override
   List<PhoneDataPoint> rawDataPoints(WindowType window) {
@@ -77,45 +85,50 @@ class PhoneModule extends BaseSynheartModule implements RawPhoneDataProvider {
     _isStartingCollection = true;
     try {
       // Start motion collection
-      await _motionCollector.start();
-      _subscriptions.add(
-        _motionCollector.motionStream.listen(
-          (motion) {
-            if (!_consent.current().phoneContext) return;
-            _cache.addMotionData(motion);
-          },
-          onError: (e, st) => SynheartLogger.log(
-            '[PhoneModule] Motion error: $e',
-            error: e,
-            stackTrace: st,
+      if (runtimeAllows('phone_context.device_motion')) {
+        await _motionCollector.start();
+        _subscriptions.add(
+          _motionCollector.motionStream.listen(
+            (motion) {
+              if (!_collects('phone_context.device_motion')) return;
+              _cache.addMotionData(motion);
+            },
+            onError: (e, st) => SynheartLogger.log(
+              '[PhoneModule] Motion error: $e',
+              error: e,
+              stackTrace: st,
+            ),
           ),
-        ),
-      );
+        );
+      }
 
       // Start screen state tracking
-      await _screenTracker.start();
-      _subscriptions.add(
-        _screenTracker.screenStream.listen(
-          (state) {
-            if (!_consent.current().phoneContext) return;
-            _cache.addScreenState(state, DateTime.now());
-          },
-          onError: (e, st) => SynheartLogger.log(
-            '[PhoneModule] Screen state error: $e',
-            error: e,
-            stackTrace: st,
+      if (runtimeAllows('phone_context.system_state')) {
+        await _screenTracker.start();
+        _subscriptions.add(
+          _screenTracker.screenStream.listen(
+            (state) {
+              if (!_collects('phone_context.system_state')) return;
+              _cache.addScreenState(state, DateTime.now());
+            },
+            onError: (e, st) => SynheartLogger.log(
+              '[PhoneModule] Screen state error: $e',
+              error: e,
+              stackTrace: st,
+            ),
           ),
-        ),
-      );
+        );
+      }
 
       // Start app tracking (if capability allows)
       if (_capabilities.capability(Module.phone).index >=
-          CapabilityLevel.extended.index) {
+              CapabilityLevel.extended.index &&
+          runtimeAllows('behavior.app_context')) {
         await _appTracker.start();
         _subscriptions.add(
           _appTracker.appSwitchStream.listen(
             (_) {
-              if (!_consent.current().phoneContext) return;
+              if (!_collects('behavior.app_context')) return;
               _cache.addAppSwitch(DateTime.now());
             },
             onError: (e, st) => SynheartLogger.log(
@@ -129,12 +142,13 @@ class PhoneModule extends BaseSynheartModule implements RawPhoneDataProvider {
 
       // Start notification tracking (if capability allows)
       if (_capabilities.capability(Module.phone).index >=
-          CapabilityLevel.extended.index) {
+              CapabilityLevel.extended.index &&
+          runtimeAllows('behavior.notification_patterns')) {
         await _notificationTracker.start();
         _subscriptions.add(
           _notificationTracker.notificationStream.listen(
             (event) {
-              if (!_consent.current().phoneContext) return;
+              if (!_collects('behavior.notification_patterns')) return;
               _cache.addNotification(event);
             },
             onError: (e, st) => SynheartLogger.log(

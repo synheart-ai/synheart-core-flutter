@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:synheart_behavior/synheart_behavior.dart' as sb;
 import '../../core/logger.dart';
+import '../base/runtime_channel_gate.dart';
 import '../base/synheart_module.dart';
 import '../interfaces/consent_provider.dart';
 import '../interfaces/feature_providers.dart';
@@ -24,6 +25,7 @@ import 'window_aggregator.dart';
 /// synheart_behavior.initialize() starts native collection, so we only
 /// initialize when `behavior` consent is granted (inside onStart).
 class BehaviorModule extends BaseSynheartModule
+    with RuntimeChannelGate
     implements RawBehaviorDataProvider {
   @override
   String get moduleId => 'behavior';
@@ -214,10 +216,15 @@ class BehaviorModule extends BaseSynheartModule
   /// ```
   sb.SynheartBehavior? get synheartBehavior => _synheartBehavior;
 
+  /// Interaction tracking needs the consent channel and, with a runtime
+  /// attached, the runtime's acceptance of it.
+  bool _allowsDigitalActivity(ConsentSnapshot consent) =>
+      consent.allowsChannel('behavior.digital_activity') &&
+      runtimeAllows('behavior.digital_activity');
+
   @override
   List<BehaviorEvent> rawEvents(WindowType window) {
-    if (!_consent.current().allowsChannel('behavior.digital_activity'))
-      return [];
+    if (!_allowsDigitalActivity(_consent.current())) return [];
     return _aggregator.getEvents(window);
   }
 
@@ -245,7 +252,7 @@ class BehaviorModule extends BaseSynheartModule
       );
       _synheartBehaviorEventLogCount++;
     }
-    if (!_consent.current().allowsChannel('behavior.digital_activity')) {
+    if (!_allowsDigitalActivity(_consent.current())) {
       if (_synheartBehaviorEventLogCount <= 3) {
         SynheartLogger.log(
           '[BehaviorModule] _onSynheartBehaviorEvent: DROPPED '
@@ -378,7 +385,7 @@ class BehaviorModule extends BaseSynheartModule
     // Observe consent so we can start/stop dynamically.
     _consentSubscription ??= _consent.observe().listen(
       (consent) async {
-        if (!consent.allowsChannel('behavior.digital_activity')) {
+        if (!_allowsDigitalActivity(consent)) {
           await _stopTracking(disposeSdk: true);
         } else {
           await _startTrackingIfNeeded();
@@ -411,7 +418,7 @@ class BehaviorModule extends BaseSynheartModule
       );
       return;
     }
-    if (!_consent.current().allowsChannel('behavior.digital_activity')) {
+    if (!_allowsDigitalActivity(_consent.current())) {
       SynheartLogger.log(
         '[BehaviorModule] _startTrackingIfNeeded: SKIP (consent channel '
         '"behavior.digital_activity" not granted)',
@@ -458,8 +465,7 @@ class BehaviorModule extends BaseSynheartModule
       // Subscribe to manual event stream only when consent is granted.
       _eventSubscription = _eventStream.events.listen(
         (event) {
-          if (!_consent.current().allowsChannel('behavior.digital_activity'))
-            return;
+          if (!_allowsDigitalActivity(_consent.current())) return;
           _aggregator.addEvent(event);
         },
         onError: (e, st) => SynheartLogger.log(

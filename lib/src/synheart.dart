@@ -1526,6 +1526,13 @@ class Synheart {
         enableMotionLite: _config?.behaviorConfig?.enableMotionLite ?? false,
         emitRawMotionSamples: _config?.resolvedEmitRawMotionSamples ?? false,
       );
+      // Collectors skip what the runtime would refuse: a channel the user did
+      // not consent to, or one the app did not declare as a data input.
+      bool runtimeAllowsChannel(String channel) =>
+          _coreRuntime?.allowsChannel(channel) ?? true;
+      _wearModule!.runtimeAllowsChannel = runtimeAllowsChannel;
+      _phoneModule!.runtimeAllowsChannel = runtimeAllowsChannel;
+      _behaviorModule!.runtimeAllowsChannel = runtimeAllowsChannel;
 
       _moduleManager.registerModule(
         _wearModule!,
