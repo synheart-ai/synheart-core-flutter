@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`CoreRuntimeBridge.wellnessJson()`.** Current runtimes no longer compute a
+  Wellness score, so it returns null. Use `stress` from the HSI stream for a
+  live view relative to the person's baseline, and `recovery` or `readiness`
+  for the daily one.
+
 ### Added
 
 - **Collectors follow the runtime's per-channel decision live.** The wear,

@@ -2622,7 +2622,13 @@ class CoreRuntimeBridge {
 
   // ── Wellness Score ───────────────────────────────────────────────────
 
-  /// Get the last Wellness Score as JSON, or null if baselines are not ready.
+  /// Always null on current runtimes, which no longer compute a Wellness
+  /// score. Read `stress` from the HSI stream for a live view relative to the
+  /// person's baseline, and `recovery` or `readiness` for the daily one.
+  @Deprecated(
+    'The runtime no longer computes a Wellness score; this returns null. '
+    'Use stress for the live view and recovery or readiness for the daily one.',
+  )
   String? wellnessJson() => _readOrNote(_ffi.wellnessJson(_handle));
 
   String? lastFeatures() => _readAndFree(_ffi.lastFeatures(_handle));
