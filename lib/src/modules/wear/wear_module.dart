@@ -4,6 +4,7 @@ import 'package:synheart_wear/synheart_wear.dart' as wear;
 import '../../core/logger.dart';
 import '../../core_runtime/core_runtime_bridge.dart';
 import '../../models/canonical_wearable_event.dart';
+import '../base/runtime_channel_gate.dart';
 import '../base/synheart_module.dart';
 import '../interfaces/consent_provider.dart';
 import '../interfaces/feature_providers.dart';
@@ -17,7 +18,9 @@ import 'wearable_event_processor.dart';
 /// Wear Module
 ///
 /// Collects and buffers raw biosignals from wearables.
-class WearModule extends BaseSynheartModule implements RawWearDataProvider {
+class WearModule extends BaseSynheartModule
+    with RuntimeChannelGate
+    implements RawWearDataProvider {
   @override
   String get moduleId => 'wear';
 
@@ -100,8 +103,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
   /// starts the sources; it still waits for biosignals consent.
   Future<void> requestCollection() async {
     _collectionRequested = true;
-    if (status == ModuleStatus.running &&
-        _consent.current().allowsChannel('biosignals.vitals')) {
+    if (status == ModuleStatus.running && _allowsVitals(_consent.current())) {
       await _startDataCollection();
     }
   }
@@ -142,9 +144,15 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     }
   }
 
+  /// Heart-rate collection needs the consent channel and, with a runtime
+  /// attached, the runtime's acceptance of it.
+  bool _allowsVitals(ConsentSnapshot consent) =>
+      consent.allowsChannel('biosignals.vitals') &&
+      runtimeAllows('biosignals.vitals');
+
   @override
   List<WearSample> rawSamples(WindowType window) {
-    if (!_consent.current().allowsChannel('biosignals.vitals')) return [];
+    if (!_allowsVitals(_consent.current())) return [];
     return _cache.getSamples(window);
   }
 
@@ -172,13 +180,13 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     _consentSubscription = _consent
         .observe()
         .asyncMap((consent) async {
-          if (!consent.allowsChannel('biosignals.vitals')) {
+          if (!_allowsVitals(consent)) {
             // Consent revoked - stop data collection immediately
             // SynheartLogger.log(
             //   '[WearModule] Biosignals consent revoked - stopping data collection',
             // );
             await _stopDataCollection();
-          } else if (consent.allowsChannel('biosignals.vitals') &&
+          } else if (_allowsVitals(consent) &&
               _subscriptions.isEmpty &&
               _mayCollect) {
             // Consent granted (either initially or after revoke) — start data collection.
@@ -221,7 +229,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
     // Start data collection only when consent is granted.
     // This prevents OS health permission dialogs from appearing before the user
     // grants Synheart biosignals consent.
-    if (_consent.current().allowsChannel('biosignals.vitals') && _mayCollect) {
+    if (_allowsVitals(_consent.current()) && _mayCollect) {
       await _startDataCollection();
     }
   }
@@ -241,7 +249,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
 
     try {
       // Check consent again before starting
-      if (!_consent.current().allowsChannel('biosignals.vitals')) {
+      if (!_allowsVitals(_consent.current())) {
         // SynheartLogger.log(
         //   '[WearModule] Cannot start: biosignals consent denied',
         // );
@@ -291,7 +299,7 @@ class WearModule extends BaseSynheartModule implements RawWearDataProvider {
           final subscription = source.sampleStream.listen(
             (sample) {
               // Check consent before caching or streaming - don't process if consent is denied
-              if (!_consent.current().allowsChannel('biosignals.vitals')) {
+              if (!_allowsVitals(_consent.current())) {
                 // SynheartLogger.log(
                 //   '[WearModule] Sample ignored: biosignals consent denied',
                 // );

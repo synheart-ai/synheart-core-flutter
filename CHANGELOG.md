@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Collectors follow the runtime's per-channel decision live.** The wear,
+  phone and behavior modules now ask the native runtime
+  (`synheart_core_allows_channel`) before collecting a channel, whatever
+  `strictChannelConsent` is set to. The runtime refuses a channel the user did
+  not consent to, or one the app did not declare as a data input, so the SDK
+  no longer collects data that would be dropped on ingest. A phone collector
+  whose channel is refused is not started at all, so it raises no permission
+  prompt. Without a runtime, or with one older than 0.39.0, nothing changes.
+
 - **`SynheartConfig.strictChannelConsent`: consent enforced per channel.**
   Off by default. With it on, the SDK passes `strict_channel_consent` to the
   native runtime, which then accepts a sample only when its own consent
