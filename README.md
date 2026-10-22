@@ -929,13 +929,42 @@ SynheartConfig(
 Check readiness before presenting sync actions:
 
 ```dart
-final readiness = await Synheart.checkSyncReadiness();
-final result = await Synheart.syncNow();
-final status = await Synheart.getSyncStatus();
+final readiness = await Synheart.checkSyncReadiness(
+  operation: SyncOperation.syncNow,
+);
+if (readiness.isReady) {
+  final result = await Synheart.syncNow();
+}
+final status = Synheart.syncStatus(); // local state, no network
 ```
 
-The SDK also exposes space creation, pairing, recovery, device listing,
-revocation, leave, and delete operations through the `Synheart.sync*` methods.
+`syncStatus()` reports the active space, pending uploads, the last successful
+cycle and whether the space key is unlocked. The device roster lives on the
+server: read it with `syncListDevices()`.
+
+To pair a second device, mint a code on the first one and poll its status
+while the code is on screen:
+
+```dart
+final pairing = await Synheart.syncGeneratePairing();
+final token = pairing?['token'] as String?;
+// Show the code. Then, every 2-3 s:
+final status = await Synheart.syncPairingStatus(token!);
+if (status == null) {
+  // Runtime too old to report pairing status (Synheart.syncPairingStatusAvailable).
+} else if (status.state == SyncPairingState.joined) {
+  // status.joinedDevice names the device that joined. Stop polling.
+} else if (status.isExpiredAt(DateTime.now())) {
+  // Code expired unused. Stop polling and offer a new one.
+}
+// waiting or unknown: keep polling.
+```
+
+Sync carries baseline snapshots only; HSI windows and session summaries stay
+on the device that produced them.
+
+The SDK also exposes recovery, device listing, revocation, leave, and delete
+operations through the `Synheart.sync*` methods.
 Native sync failures may throw `SyncNativeException`; inspect `code`,
 `message`, and `retryable`.
 
@@ -1131,8 +1160,11 @@ import 'package:synheart_core/synheart_core.dart';
   `startPhoneCollection`
 - Storage: `listSessions`, `getSessionSummary`, `getHSIWindows`,
   `getStorageUsage`, `wipeLocalData`
-- Sync: `checkSyncReadiness`, `syncNow`, `syncCreateSpace`,
-  `syncGeneratePairing`, `syncJoinSpace`
+- Sync: `checkSyncReadiness`, `syncReadinessSnapshot`, `syncStatus`,
+  `setSyncEnabled`, `syncNow`, `syncCreateSpace`, `syncGeneratePairing`,
+  `syncPairingStatus`, `syncJoinSpace`, `syncRecoverSpace`, `syncListDevices`,
+  `syncRevokeDevice`, `syncLeaveSpace`, `syncDeleteSpace`,
+  `syncClearLocalSpace`
 - Cloud: `Synheart.ingestion`, upload queue and last-attempt getters
 - Research: `lab*`, research-study helpers, and `SynheartInstance`
 - Models: HSI state/axes, artifacts, baselines, scores, sessions, metrics,
