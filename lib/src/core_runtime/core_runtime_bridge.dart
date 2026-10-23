@@ -59,6 +59,7 @@ enum _SyncFfiOperation {
   syncNow,
   createSpace,
   generatePairing,
+  pairingStatus,
   joinSpace,
   recoverSpace,
   leaveSpace,
@@ -137,6 +138,12 @@ Map<String, dynamic>? _executeSyncFfiOperation({
         (name) => ffi.syncCreateSpace(handle, name.cast()),
       ),
       _SyncFfiOperation.generatePairing => ffi.syncGeneratePairing(handle),
+      _SyncFfiOperation.pairingStatus => _withWorkerCString(
+        firstArg,
+        (token) =>
+            ffi.syncPairingStatus?.call(handle, token.cast()) ??
+            nullptr.cast<Utf8>(),
+      ),
       _SyncFfiOperation.joinSpace => _withWorkerCString(
         firstArg,
         (token) => _withWorkerCString(
@@ -2298,8 +2305,28 @@ class CoreRuntimeBridge {
     );
   }
 
-  /// Snapshot of the sync-engine state: `{enabled, sync_space_id,
-  /// device_count}`. Use for the "paired with N devices" UI line.
+  /// Whether the loaded runtime exports `synheart_core_sync_pairing_status`.
+  bool get syncPairingStatusAvailable => _ffi.syncPairingStatus != null;
+
+  /// The server's verdict on a pairing token this device minted with
+  /// [syncGeneratePairing]: `{status, sync_space_id, joined_device,
+  /// joined_at, expires_at}`, where `status` is `waiting`, `joined`,
+  /// `expired` or `unknown`. Network call; runs on the sync worker. Null when
+  /// the runtime predates the call.
+  Future<Map<String, dynamic>?> syncPairingStatus(String token) {
+    if (!syncPairingStatusAvailable) return Future.value(null);
+    return _runBackgroundSyncEnvelope(
+      _SyncFfiOperation.pairingStatus,
+      firstArg: token,
+    );
+  }
+
+  /// Local sync-engine state, no network: `{enabled, sync_space_id,
+  /// pending_count, last_success_ms, srk_ready, account_owned}` on runtime
+  /// 0.39.0 and later (older runtimes sent `{enabled, sync_space_id,
+  /// device_count}`, with `device_count` always 0). The device roster lives on
+  /// the server: read it with [syncListDevices] for a "paired with N devices"
+  /// line.
   Map<String, dynamic>? syncStatus() {
     return _callSyncEnvelope(() => _ffi.syncStatus(_handle));
   }

@@ -6,11 +6,12 @@ import 'screens/diagnostics_screen.dart';
 import 'screens/host_screen.dart';
 import 'screens/session_screen.dart';
 import 'screens/setup_screen.dart';
+import 'screens/sync_screen.dart';
 import 'sdk/synheart_controller.dart';
 
 /// Synheart Core SDK — reference example.
 ///
-/// Five tabs, one per step of the SDK lifecycle, in the order a host app
+/// Six tabs, one per step of the SDK lifecycle, in the order a host app
 /// performs them:
 ///
 ///   Setup       → build a config and initialize
@@ -18,6 +19,8 @@ import 'sdk/synheart_controller.dart';
 ///   Session     → start collection, watch HSI arrive
 ///   Host        → what the host has to keep DOING once a session is live:
 ///                 the tick loop, rest declaration, snapshots, daily loop
+///   Sync        → cross-device sync: space, pairing, devices (needs
+///                 attestation and cloud-upload consent)
 ///   Diagnostics → native runtime health
 ///
 /// The Host tab is the one that is easy to skip and shouldn't be. Everything
@@ -76,6 +79,7 @@ class _HomeShellState extends State<_HomeShell> {
     ConsentScreen(),
     SessionScreen(),
     HostScreen(),
+    SyncScreen(),
     DiagnosticsScreen(),
   ];
 
@@ -154,6 +158,14 @@ class _HomeShellState extends State<_HomeShell> {
             ),
             selectedIcon: const Icon(Icons.settings_input_antenna),
             label: 'Host',
+          ),
+          NavigationDestination(
+            icon: Icon(
+              Icons.sync_outlined,
+              color: ready ? null : Theme.of(context).disabledColor,
+            ),
+            selectedIcon: const Icon(Icons.sync),
+            label: 'Sync',
           ),
           NavigationDestination(
             icon: Icon(

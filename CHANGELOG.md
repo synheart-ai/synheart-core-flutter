@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Synheart.syncStatus()`: typed sync status.** Returns a `SyncStatus` with
+  the runtime 0.39.0 fields (`syncSpaceId`, `pendingCount`, `lastSuccessMs`,
+  `srkReady`, `accountOwned`). Fields an older runtime never sent stay `null`.
+  `device_count` is gone from the runtime; read the roster with
+  `syncListDevices()`.
+- **`Synheart.syncPairingStatus(token)`: pairing status.** The device showing
+  a pairing code can now tell when the other device joined. Returns a
+  `SyncPairingStatus` (`waiting`, `joined`, `expired` or `unknown`); poll it
+  every 2–3 s until the state is terminal or `expiresAt` passes. Returns
+  `null` on a runtime without `synheart_core_sync_pairing_status` (before
+  0.31.6); check `Synheart.syncPairingStatusAvailable`.
+
+### Changed
+
+- README sync example now compiles (`checkSyncReadiness` takes a required
+  `operation`), and the sync API list is complete. Sync carries baseline
+  snapshots only; another device's HSI windows and session summaries do not
+  arrive.
+
+### Removed
+
+- **`Synheart.getSyncStatus()`**, deprecated since 0.11 and promised for
+  removal in 0.12.0. Use `Synheart.syncStatus()`. `SyncStatus` is now the
+  richer type above; `SyncStatus(enabled: ...)` still constructs.
+
 ## [0.18.1] - 2026-10-23
 
 ### Changed

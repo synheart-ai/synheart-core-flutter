@@ -41,6 +41,7 @@ export 'src/config/synheart_errors.dart';
 
 // Cross-device synchronization readiness.
 export 'src/sync/sync_readiness.dart';
+export 'src/sync/sync_status.dart';
 
 // Artifacts (Tier A)
 //
