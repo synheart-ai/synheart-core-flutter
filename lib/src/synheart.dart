@@ -54,6 +54,7 @@ import 'core_runtime/runtime_exception.dart';
 import 'core_runtime/ffi_bindings.dart' show SynheartCoreFFI;
 import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
 import 'sync/sync_readiness.dart';
+import 'sync/sync_status.dart';
 
 import 'modules/consent/consent_profile.dart';
 import 'modules/consent/consent_token.dart';
@@ -756,9 +757,46 @@ class Synheart {
     );
   }
 
-  /// Snapshot of the sync-engine state.
+  /// Raw sync-engine state, as the runtime reports it. Prefer [syncStatus]
+  /// for the typed view.
   static Map<String, dynamic>? syncStatusSnapshot() =>
       _coreRuntime?.syncStatus();
+
+  /// Local sync-engine state: whether the engine is built, the active space,
+  /// pending uploads, the last successful cycle, whether the space key is
+  /// unlocked and whether the space is account-owned. No network call.
+  ///
+  /// Null when the runtime bridge isn't ready. Throws [SyncNativeException]
+  /// when the runtime reports a failure (e.g. `STORAGE_UNAVAILABLE`). The
+  /// device roster lives on the server: read it with [syncListDevices].
+  static SyncStatus? syncStatus() {
+    final snapshot = _coreRuntime?.syncStatus();
+    return snapshot == null ? null : SyncStatus.fromMap(snapshot);
+  }
+
+  /// Whether the linked runtime can report pairing status
+  /// ([syncPairingStatus]). False on a runtime older than 0.31.6.
+  static bool get syncPairingStatusAvailable =>
+      _coreRuntime?.syncPairingStatusAvailable ?? false;
+
+  /// The server's verdict on a pairing token from [syncGeneratePairing]:
+  /// still waiting, joined (and by which device), or expired.
+  ///
+  /// Poll it every 2–3 seconds while the pairing code is on screen. Stop when
+  /// [SyncPairingState.isTerminal] or once [SyncPairingStatus.expiresAt] has
+  /// passed; treat [SyncPairingState.unknown] as still pending. Network call;
+  /// runs off the UI isolate.
+  ///
+  /// Null when the runtime bridge isn't ready or the runtime predates the
+  /// call (see [syncPairingStatusAvailable]); the host then has no signal and
+  /// should say so rather than guess. Throws [SyncNativeException] when the
+  /// runtime reports a failure.
+  static Future<SyncPairingStatus?> syncPairingStatus(String token) async {
+    final runtime = _coreRuntime;
+    if (runtime == null) return null;
+    final data = await runtime.syncPairingStatus(token);
+    return data == null ? null : SyncPairingStatus.fromMap(data);
+  }
 
   /// Unified native sync-readiness snapshot: prerequisite booleans plus a
   /// primary `state` (e.g. `CONFIGURATION_MISSING`,
@@ -886,28 +924,6 @@ class Synheart {
     final bridge = _coreRuntime;
     if (bridge == null) return null;
     return bridge.baselineImportOffline(passphrase: passphrase, blob: blob);
-  }
-
-  /// Get current sync status.
-  ///
-  /// Reports whether the sync engine is enabled, read from the native
-  /// sync-status snapshot and falling back to the configured value. Until
-  /// 0.10.2 this returned a hardcoded `SyncStatus(enabled: false)` regardless
-  /// of configuration or runtime state.
-  ///
-  /// [syncStatusSnapshot] and [syncReadinessSnapshot] carry the full picture
-  /// (active space, device list, why sync is not ready); prefer them for
-  /// anything beyond a boolean.
-  @Deprecated(
-    'Returns only a single boolean. Use syncReadinessSnapshot() for the '
-    'primary readiness state, or syncStatusSnapshot() for engine detail. '
-    'Will be removed in 0.12.0.',
-  )
-  static Future<SyncStatus> getSyncStatus() async {
-    final snapshot = _coreRuntime?.syncStatus();
-    final nativeEnabled = snapshot?['enabled'];
-    if (nativeEnabled is bool) return SyncStatus(enabled: nativeEnabled);
-    return SyncStatus(enabled: shared._config?.sync.enabled ?? false);
   }
 
   // Activation API
@@ -6377,13 +6393,6 @@ class SyncResult {
     }
     return SyncResult(pushed: pushed.toInt(), pulled: pulled.toInt());
   }
-}
-
-/// Current sync status.
-class SyncStatus {
-  final bool enabled;
-
-  const SyncStatus({required this.enabled});
 }
 
 /// Session record returned from session queries.

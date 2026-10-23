@@ -112,20 +112,24 @@ data to give and the app says so rather than inventing values.
 lib/
   main.dart                     app shell, tab navigation
   sdk/
-    synheart_controller.dart    THE ONLY FILE THAT CALLS THE SDK
+    synheart_controller.dart    lifecycle: initialize, consent, session
+    mobile_host_runner.dart     what a host keeps doing once a session runs
+    sync_runner.dart            cross-device sync: space, pairing, devices
     axis_coverage.dart          all 18 canonical axes: present / withheld / absent
   screens/
     setup_screen.dart           config + initialize
     consent_screen.dart         runtime editable-form consent flow
     session_screen.dart         start/stop, live HSI, signal sources
+    host_screen.dart            tick loop, rest, snapshots, daily loop
+    sync_screen.dart            sync readiness, status, pairing, devices
     diagnostics_screen.dart     runtime version, native symbol audit
   widgets/ui.dart               shared building blocks
 example.dart                    minimal standalone snippet
 ```
 
-Start with `sdk/synheart_controller.dart`. No screen imports
-`package:synheart_core` — they read state from the controller and call its
-methods, so the whole integration is one readable file.
+Start with `sdk/synheart_controller.dart`. Only `sdk/` calls the SDK: no
+screen imports `package:synheart_core` — they read state from the controller
+(and its `host` and `sync` runners) and call their methods.
 
 ## What it demonstrates
 
@@ -142,6 +146,16 @@ methods, so the whole integration is one readable file.
   corrupt real reference ranges on whatever device ran the demo. It shows which
   sources are attached, which actually feed the runtime, and says plainly when
   none is.
+- **Cross-device sync** — the Sync tab, on two devices. Device A creates a
+  space and generates a code; device B joins with it. Device A polls
+  `syncPairingStatus` every 3 s and flips from `waiting` to `joined`, naming
+  device B, without a tap. Readiness is shown per operation, so a disabled
+  action names the missing prerequisite. Needs attestation
+  (`SYNHEART_AUTH_URL` and `SYNHEART_BASE_URL`) and cloud-upload consent;
+  without them every row reads blocked, which is the correct answer. Sync
+  carries baselines only, not HSI windows or sessions. It is also a paid-plan
+  feature. The SDK does not check the plan; the host does. This example has no
+  sign-in, so it needs an account or environment where the server allows it.
 - **Runtime diagnostics** — `runtimeDiagnostics(probeAll: true)` reports which
   optional native symbols the loaded runtime exports. Optional bindings resolve
   lazily, so a screen that just reads `missingSymbols` looks healthy while

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synheart_core/synheart_core.dart';
 
 import 'mobile_host_runner.dart';
+import 'sync_runner.dart';
 
 /// The one place in this example that talks to the Synheart SDK.
 ///
@@ -79,6 +80,19 @@ class SynheartController extends ChangeNotifier {
   }
 
   static const String authBaseUrl = String.fromEnvironment('SYNHEART_AUTH_URL');
+
+  /// Platform origin consent and ingest resolve through. See README: set it
+  /// together with [authBaseUrl].
+  static const String platformBaseUrl = String.fromEnvironment(
+    'SYNHEART_BASE_URL',
+  );
+
+  /// The origin sync talks to. Empty when attestation is off, which keeps the
+  /// local-only config exactly as it was.
+  static String get syncBaseUrl {
+    if (!attestationConfigured) return '';
+    return platformBaseUrl.isNotEmpty ? platformBaseUrl : authBaseUrl;
+  }
 
   /// Organization id, required only for HSI upload — cloud ingest stays
   /// disabled without one. Independent of attestation.
@@ -164,6 +178,10 @@ class SynheartController extends ChangeNotifier {
   late final MobileHostRunner host = MobileHostRunner(
     onChanged: notifyListeners,
   );
+
+  /// Cross-device sync — space, pairing, devices, cycles. Its own flow, so
+  /// its own runner; see [SyncRunner].
+  late final SyncRunner sync = SyncRunner(onChanged: notifyListeners);
 
   /// Backgrounding is where §6 gets specific: `flush_pending` on the way out,
   /// or up to one lateness budget's worth of completed windows is stranded
@@ -360,6 +378,19 @@ class SynheartController extends ChangeNotifier {
               allowUnattestedDevRegistration: kDebugMode,
             )
           : null,
+      // Sync rides the same attested identity as upload: every sync request
+      // is signed with the device key, so with no attestation there is no
+      // engine to build.
+      //
+      // The origin must be explicit. The runtime refuses to build the sync
+      // engine with an empty `sync.base_url`, and `SyncConfig`'s default only
+      // reads the per-service SYNHEART_AUTH_BASE_URL define, which this
+      // example does not use. `SyncConfig.baseUrl` is also the origin the SDK
+      // hands the runtime for everything else, so it is the platform origin
+      // (SYNHEART_BASE_URL), falling back to the attestation host — never a
+      // third environment.
+      sync: SyncConfig(enabled: attestationConfigured, baseUrl: syncBaseUrl),
+
       cloudConfig: uploadConfigured
           ? CloudConfig(
               subjectId: _subjectId ?? '',
@@ -438,6 +469,11 @@ class SynheartController extends ChangeNotifier {
         // work also runs on every pause and once per emitted window.
         onDetach: () => host.onBackgrounded(),
       );
+
+      // No config field activates synsync, so a host turns it on itself.
+      // Activation is only one of the gates: cloud-upload consent and a
+      // registered device are still required (the Sync tab shows each one).
+      if (attestationConfigured) Synheart.activate(SynheartFeature.synsync);
 
       await refreshConsent();
     } on SynheartError catch (e) {
@@ -878,6 +914,7 @@ class SynheartController extends ChangeNotifier {
 
   /// Stop and release everything, returning to the pre-initialize state.
   Future<void> shutdown() async {
+    sync.stopPolling();
     await stopSession();
     try {
       await Synheart.dispose();
@@ -927,6 +964,7 @@ class SynheartController extends ChangeNotifier {
     _behaviorSub?.cancel();
     _lifecycleListener?.dispose();
     host.dispose();
+    sync.dispose();
     super.dispose();
   }
 }

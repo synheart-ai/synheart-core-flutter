@@ -479,6 +479,10 @@ typedef _SyncRevokeDeviceC =
     Pointer<Utf8> Function(Pointer<Void> h, Pointer<Utf8> deviceId);
 typedef _SyncRevokeDeviceDart =
     Pointer<Utf8> Function(Pointer<Void> h, Pointer<Utf8> deviceId);
+typedef _SyncPairingStatusC =
+    Pointer<Utf8> Function(Pointer<Void> h, Pointer<Utf8> token);
+typedef _SyncPairingStatusDart =
+    Pointer<Utf8> Function(Pointer<Void> h, Pointer<Utf8> token);
 typedef _SyncDeleteSpaceC = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncDeleteSpaceDart = Pointer<Utf8> Function(Pointer<Void> h);
 
@@ -1481,6 +1485,17 @@ class SynheartCoreFFI {
       .lookupFunction<_SyncRevokeDeviceC, _SyncRevokeDeviceDart>(
         'synheart_core_sync_revoke_device',
       );
+
+  /// `synheart_core_sync_pairing_status(handle, token)`: the server's verdict
+  /// on a pairing token this device minted, as a sync envelope. Optional so
+  /// a runtime that predates it degrades to "not available" instead of
+  /// failing the whole bridge.
+  late final syncPairingStatus = _optional(
+    'synheart_core_sync_pairing_status',
+    () => _lib.lookupFunction<_SyncPairingStatusC, _SyncPairingStatusDart>(
+      'synheart_core_sync_pairing_status',
+    ),
+  );
   late final syncDeleteSpace = _lib
       .lookupFunction<_SyncDeleteSpaceC, _SyncDeleteSpaceDart>(
         'synheart_core_sync_delete_space',
