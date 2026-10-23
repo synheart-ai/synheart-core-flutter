@@ -9,17 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`SynheartConfig.strictChannelConsent`: consent enforced per channel.**
-  Off by default. With it on, the SDK passes `strict_channel_consent` to the
-  native runtime, which then accepts a sample only when its own consent
-  channel is granted (`phone_context.device_motion` for phone motion,
-  `behavior.app_context` for app-context events, and so on) and, when cloud
-  consent is configured, present in the verified consent token. The SDK's
-  modules read the same per-channel decision from the runtime
-  (`synheart_core_allows_channel`) before starting a sensor, so a channel the
-  user turned off stays off even when its category is on, and phone motion is
-  checked against `phone_context.device_motion`. Needs a runtime with C ABI
-  2.1; on an older runtime the modules keep their category checks.
 - **`Synheart.syncStatus()`: typed sync status.** Returns a `SyncStatus` with
   the runtime 0.39.0 fields (`syncSpaceId`, `pendingCount`, `lastSuccessMs`,
   `srkReady`, `accountOwned`). Fields an older runtime never sent stay `null`.
@@ -34,10 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Install hints now recommend runtime 0.39.0**, the first release with C ABI
-  2.1 and `synheart_core_allows_channel`. Runtimes from 0.20.0 up to 0.38.x
-  still initialise; they log as older than the bindings expect, and
-  `strictChannelConsent` has no effect on them.
 - README sync example now compiles (`checkSyncReadiness` takes a required
   `operation`), and the sync API list is complete. Sync carries baseline
   snapshots only; another device's HSI windows and session summaries do not
@@ -48,6 +33,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Synheart.getSyncStatus()`**, deprecated since 0.11 and promised for
   removal in 0.12.0. Use `Synheart.syncStatus()`. `SyncStatus` is now the
   richer type above; `SyncStatus(enabled: ...)` still constructs.
+
+## [0.18.1] - 2026-10-23
+
+### Changed
+
+- **Install hints now recommend runtime 0.41.0.** It computes only the outputs
+  the app declared, instead of computing every output and leaving the
+  undeclared ones out of what it reports. Runtimes from 0.20.0 up still
+  initialise.
+
+## [0.18.0] - 2026-10-22
+
+### Deprecated
+
+- **`CoreRuntimeBridge.wellnessJson()`.** Current runtimes no longer compute a
+  Wellness score, so it returns null. Use `stress` from the HSI stream for a
+  live view relative to the person's baseline, and `recovery` or `readiness`
+  for the daily one.
+
+### Added
+
+- **Collectors follow the runtime's per-channel decision live.** The wear,
+  phone and behavior modules now ask the native runtime
+  (`synheart_core_allows_channel`) before collecting a channel, whatever
+  `strictChannelConsent` is set to. The runtime refuses a channel the user did
+  not consent to, or one the app did not declare as a data input, so the SDK
+  no longer collects data that would be dropped on ingest. A phone collector
+  whose channel is refused is not started at all, so it raises no permission
+  prompt. Without a runtime, or with one older than 0.39.0, nothing changes.
+
+- **`SynheartConfig.strictChannelConsent`: consent enforced per channel.**
+  Off by default. With it on, the SDK passes `strict_channel_consent` to the
+  native runtime, which then accepts a sample only when its own consent
+  channel is granted (`phone_context.device_motion` for phone motion,
+  `behavior.app_context` for app-context events, and so on) and, when cloud
+  consent is configured, present in the verified consent token. The SDK's
+  modules read the same per-channel decision from the runtime
+  (`synheart_core_allows_channel`) before starting a sensor, so a channel the
+  user turned off stays off even when its category is on, and phone motion is
+  checked against `phone_context.device_motion`. Needs a runtime with C ABI
+  2.1; on an older runtime the modules keep their category checks.
+
+### Changed
+
+- **Install hints now recommend runtime 0.40.0.** It keeps collection and the
+  state it reports to the data inputs and outputs the app declared, and no
+  longer computes a Wellness score. Per-channel decisions
+  (`synheart_core_allows_channel`, C ABI 2.1) need runtime 0.39.0 or later.
+  Runtimes from 0.20.0 up still initialise; older than 0.39.0 they log as older
+  than the bindings expect, and `strictChannelConsent` has no effect on them.
 
 ## [0.17.2] - 2026-10-15
 

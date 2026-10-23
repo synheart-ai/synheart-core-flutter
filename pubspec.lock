@@ -625,10 +625,10 @@ packages:
     dependency: "direct main"
     description:
       name: synheart_auth
-      sha256: "57390e6c06679ff003a9ceb8df1d35a943dba3a5d846f9f3e2e288f61d59db85"
+      sha256: c5f205708dc37336da46361aeb486be9eb60bbd5bac1f86dbc22a1fba4380221
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.7"
+    version: "0.1.13"
   synheart_behavior:
     dependency: "direct main"
     description:
@@ -649,10 +649,10 @@ packages:
     dependency: "direct main"
     description:
       name: synheart_wear
-      sha256: f85859e863853812636120358af1f64c4db2160f4b4afe5833be8d2eb315ea0d
+      sha256: "3ad55cde9082b09c32c73865bf04d8c48e72190509b27b8ae130da0299c9316a"
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.0"
+    version: "0.5.1"
   syni:
     dependency: "direct main"
     description:
