@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-23
+
+### Changed
+
+- **Install hints now recommend runtime 0.41.0.** It computes only the outputs
+  the app declared, instead of computing every output and leaving the
+  undeclared ones out of what it reports. Runtimes from 0.20.0 up still
+  initialise.
+
 ## [0.18.0] - 2026-10-22
 
 ### Deprecated

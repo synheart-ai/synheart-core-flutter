@@ -122,7 +122,7 @@ void main() {
       expect(e.runtimeAbi, '3.0');
       expect(e.requiredAbi, RuntimeCompat.requiredAbi);
       expect(e.recommendedVersion, RuntimeCompat.writtenAgainst);
-      expect(e.installCommand, contains('--version 0.40.0'));
+      expect(e.installCommand, contains('--version 0.41.0'));
       expect(e.toString(), contains('incompatible'));
     });
     test('a library without build info is an incompatible runtime', () {
