@@ -3662,6 +3662,10 @@ class Synheart {
     // [HsiDeliveryDeduper].
     if (!_hsiDeduper.shouldDeliver(hsiJson)) return;
 
+    // Before the consent gate: the runtime counts a daily score as carried
+    // once a frame holds it, whether or not Dart forwards the frame.
+    Baselines.noteHsiFrame(hsiJson);
+
     final local = _consentModule?.current();
     final effective = _coreRuntime?.consentEffectiveState();
     final biosignalsEffective =
@@ -4970,6 +4974,57 @@ class Synheart {
     ReadinessScoreInput input,
   ) {
     final raw = _coreRuntime?.readinessScoreComputeJson(input.toJsonString());
+    if (raw == null || raw.isEmpty || raw == 'null') return null;
+    try {
+      return ReadinessScoreResult.fromJsonString(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Uploading daily scores ────────────────────────────────────────
+  //
+  // The compute calls above are stateless: the score stays on the device.
+  // A daily score reaches the cloud only by riding an emitted HSI window as
+  // a reading on `axes.physiological`, and these queue it to do that. The
+  // runtime keeps one pending score per kind, so a later attach replaces an
+  // earlier one, and the next emitted window carries it.
+
+  /// Whether the runtime can queue a Recovery Score for upload
+  /// ([attachRecoveryScore]). False on a runtime built without the
+  /// physiological feature set.
+  static bool get attachRecoveryScoreAvailable =>
+      _coreRuntime?.attachRecoveryScoreJsonAvailable ?? false;
+
+  /// Whether the runtime can queue a Readiness Score for upload
+  /// ([attachReadinessScore]).
+  static bool get attachReadinessScoreAvailable =>
+      _coreRuntime?.attachReadinessScoreJsonAvailable ?? false;
+
+  /// Compute today's Recovery Score and queue it to ride the next emitted
+  /// HSI window, which is how it reaches the cloud. Returns the same result
+  /// [computeRecoveryScore] would.
+  ///
+  /// Null when the runtime isn't ready or can't queue it (see
+  /// [attachRecoveryScoreAvailable]), or when the night has no overnight
+  /// HR/HRV and the score abstains. Does not feed personalization; that is
+  /// [attachRecoveryScoreToday].
+  static RecoveryScoreResult? attachRecoveryScore(RecoveryScoreInput input) {
+    final raw = _coreRuntime?.attachRecoveryScoreJson(input.toJsonString());
+    if (raw == null || raw.isEmpty || raw == 'null') return null;
+    try {
+      return RecoveryScoreResult.fromJsonString(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Compute today's Readiness Score and queue it to ride the next emitted
+  /// HSI window. Returns the same result [computeReadinessScore] would, or
+  /// null when the runtime isn't ready or can't queue it (see
+  /// [attachReadinessScoreAvailable]).
+  static ReadinessScoreResult? attachReadinessScore(ReadinessScoreInput input) {
+    final raw = _coreRuntime?.attachReadinessScoreJson(input.toJsonString());
     if (raw == null || raw.isEmpty || raw == 'null') return null;
     try {
       return ReadinessScoreResult.fromJsonString(raw);

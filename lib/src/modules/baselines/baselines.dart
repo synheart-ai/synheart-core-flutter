@@ -10,6 +10,7 @@ import '../../models/recovery_score.dart';
 import '../../models/sleep_questionnaire.dart';
 import '../../models/sleep_score.dart';
 import '../../resilience/synheart_resilience.dart' show HrvSample, SleepWindow;
+import 'daily_score_ledger.dart';
 import '../../synheart.dart';
 import 'baselines_snapshot.dart';
 
@@ -131,6 +132,12 @@ class Baselines {
   /// because synheart's value is consistent constants across users.
   static final Map<int, SleepPath> _attachedPaths = <int, SleepPath>{};
 
+  /// What was last queued for upload per daily score kind, and whether a
+  /// frame carried it. Persisted in [exportRecoveryStateJson], so a relaunch
+  /// that re-pulls a month of nights does not attach them all again. See
+  /// [DailyScoreLedger].
+  static final DailyScoreLedger _ledger = DailyScoreLedger();
+
   /// Per-vendor score history keyed by `wake_calendar_date`. Every
   /// call to [ingestVendorSleep] that produces a non-null result
   /// records into this map, even when the dedupe gate skips the
@@ -212,12 +219,6 @@ class Baselines {
   /// same day, the Recovery / Readiness path picks it up.
   static final Map<int, OvernightPhysiology> _overnightByDay =
       <int, OvernightPhysiology>{};
-
-  /// Strain (`[0, 1]`) above which a day counts as "high strain" for
-  /// the Readiness history context's `consecutiveHighStrainDays`
-  /// counter. WHOOP raw strain ≥ 14 (which the SDK already
-  /// normalizes into ~`0.67`) is the conventional threshold.
-  static const double _highStrainThreshold = 0.60;
 
   /// True after the next `compute_sleep_score` call should use the
   /// in-memory priors. New nights append after a successful attach.
@@ -742,17 +743,20 @@ class Baselines {
           // a string = "attached" or "refreshed" reason for the log.
           String? attachOutcome;
           if (claimer == null) {
-            final rc = Synheart.attachSleepScore(result);
+            final (rc, queued) = _queueSleepScore(wakeDay, result);
             if (rc != 0) {
               SynheartLogger.stream('Baselines: attachSleepScore rc=$rc');
             } else {
-              attachOutcome = 'attached';
+              // Not queued: a night an earlier launch already sent. Rebuild
+              // everything local, but leave the engine ring and the mirror
+              // alone; both were restored from the snapshot with it.
+              attachOutcome = queued ? 'attached' : 'restored';
               _attachedKeys[wakeDay] = provider;
               _attachedPaths[wakeDay] = result.path;
               if (!_ringHydrated) {
                 _readRecentRing();
               }
-              if (result.score != null) {
+              if (queued && result.score != null) {
                 _appendToRing(
                   result.score!,
                   _absDayFromWakeCalendar(v.raw.wakeCalendarDate),
@@ -820,13 +824,14 @@ class Baselines {
             // Same-source refresh — overwrite the attached score
             // without touching prior bookkeeping. Logged so a
             // corrected score landing is visible in telemetry.
-            final rc = Synheart.attachSleepScore(result);
+            final (rc, queued) = _queueSleepScore(wakeDay, result);
             if (rc != 0) {
               SynheartLogger.stream(
                 'Baselines: same-source refresh attachSleepScore rc=$rc',
               );
             } else {
-              attachOutcome = 'refreshed';
+              // An unchanged replay is silent: nothing new reached the engine.
+              if (queued) attachOutcome = 'refreshed';
               // Same provider may have changed paths (e.g. WHOOP
               // upgrades from vendor-only at session-end to
               // aggregated 24h later when sleep-staging settles).
@@ -868,7 +873,7 @@ class Baselines {
             final newRank = _variantRank(result.path, provider);
             final claimerRank = _variantRank(claimerPath, claimer);
             if (newRank < claimerRank) {
-              final rc = Synheart.attachSleepScore(result);
+              final (rc, _) = _queueSleepScore(wakeDay, result);
               if (rc != 0) {
                 SynheartLogger.stream(
                   'Baselines: priority-evict attachSleepScore rc=$rc',
@@ -1082,6 +1087,7 @@ class Baselines {
     _lastVariantId = null;
     _attachedKeys.clear();
     _attachedPaths.clear();
+    _ledger.clear();
     _localRing.clear();
     _localRingDays.clear();
     _recentNights.clear();
@@ -1461,6 +1467,82 @@ class Baselines {
     );
   }
 
+  /// Attach [result] for [wakeDay] so it rides the next emitted HSI, unless
+  /// the ledger says that would resend or regress it. Returns the attach
+  /// status (`0` also when skipped) and whether it was queued.
+  static (int, bool) _queueSleepScore(int wakeDay, SleepScoreResult result) {
+    if (!_ledger.shouldQueue(DailyScoreKind.sleep, wakeDay, result.score)) {
+      return (0, false);
+    }
+    final rc = Synheart.attachSleepScore(result);
+    if (rc == 0) {
+      _ledger.noteQueued(DailyScoreKind.sleep, wakeDay, result.score);
+    }
+    return (rc, true);
+  }
+
+  /// Compute the Recovery Score for the night ending on [day], and queue it
+  /// for upload when the ledger allows. Computing first is what lets the
+  /// ledger compare scores; the attach computes again from the same input,
+  /// because the runtime cannot take a result back.
+  static RecoveryScoreResult? _scoreRecovery(
+    int day,
+    RecoveryScoreInput input,
+  ) {
+    final result = Synheart.computeRecoveryScore(input);
+    if (result == null) return null;
+    if (!Synheart.attachRecoveryScoreAvailable) {
+      _logUpload('recovery', day, 'unsupported by this runtime');
+    } else if (!_ledger.shouldQueue(
+      DailyScoreKind.recovery,
+      day,
+      result.score,
+    )) {
+      _logUpload('recovery', day, 'already queued or sent');
+    } else if (Synheart.attachRecoveryScore(input) != null) {
+      _ledger.noteQueued(DailyScoreKind.recovery, day, result.score);
+      _logUpload('recovery', day, 'queued');
+    } else {
+      _logUpload('recovery', day, 'attach failed');
+    }
+    return result;
+  }
+
+  /// Readiness counterpart of [_scoreRecovery].
+  static ReadinessScoreResult? _scoreReadiness(
+    int day,
+    ReadinessScoreInput input,
+  ) {
+    final result = Synheart.computeReadinessScore(input);
+    if (result == null) return null;
+    if (!Synheart.attachReadinessScoreAvailable) {
+      _logUpload('readiness', day, 'unsupported by this runtime');
+    } else if (!_ledger.shouldQueue(
+      DailyScoreKind.readiness,
+      day,
+      result.score,
+    )) {
+      _logUpload('readiness', day, 'already queued or sent');
+    } else if (Synheart.attachReadinessScore(input) != null) {
+      _ledger.noteQueued(DailyScoreKind.readiness, day, result.score);
+      _logUpload('readiness', day, 'queued');
+    } else {
+      _logUpload('readiness', day, 'attach failed');
+    }
+    return result;
+  }
+
+  static void _logUpload(String kind, int day, String outcome) =>
+      SynheartLogger.stream('Baselines: $kind upload day=$day: $outcome');
+
+  /// Called with every emitted HSI frame, so the ledger knows which queued
+  /// scores a frame has carried. A delivery is announced on [updates] like
+  /// any other change, so a host persisting [exportRecoveryStateJson] from
+  /// there records it; unrecorded, the next launch would send it again.
+  static void noteHsiFrame(String hsiJson) {
+    if (_ledger.noteFrame(hsiJson) && !_ctrl.isClosed) _ctrl.add(snapshot);
+  }
+
   /// Recompute and attach the *derived* daily scores — Recovery and
   /// Readiness — for [tonightRaw]. Called from [ingestVendorSleep]
   /// (per-night when not batched) and from [endIngestBatch] (once at
@@ -1510,7 +1592,8 @@ class Baselines {
         baselines: _baselinesFromReference(_latestReference),
       );
 
-      final result = Synheart.computeRecoveryScore(input);
+      final day = tonightRaw.wakeCalendarDate;
+      final result = _scoreRecovery(day, input);
       if (result == null) {
         // Engine refused (sleep-only) or runtime not ready. Leave the
         // previously-attached score (if any) alone — it represents the
@@ -1531,7 +1614,7 @@ class Baselines {
       // user-facing "what should I do today?" surface stays in sync
       // with the latest physiology read.
       _appendRecoveryScore(result.score);
-      _computeReadiness(result);
+      _computeReadiness(result, day: day, overnight: tonightOvernight);
     } catch (e, st) {
       SynheartLogger.stream(
         'Baselines: recovery compute failed: $e',
@@ -1543,42 +1626,13 @@ class Baselines {
 
   // ─── Readiness Score ──────────────────────────────────────────────
 
-  /// Bounded ring of the last 7 Recovery Scores. Used to compute the
-  /// recovery slope (points/day) for the Readiness fatigue context.
+  /// Bounded ring of the last 7 Recovery Scores, persisted with the rest of
+  /// the Recovery state.
   static void _appendRecoveryScore(int score) {
     _recentRecoveryScores.add(score);
     while (_recentRecoveryScores.length > 7) {
       _recentRecoveryScores.removeAt(0);
     }
-  }
-
-  /// Recovery slope in points/day across the recent ring (3+ entries).
-  /// Returns null when not enough history yet — the engine then
-  /// degrades to "no slope signal" rather than synthesizing one.
-  static double? _recoverySlopePerDay() {
-    if (_recentRecoveryScores.length < 3) return null;
-    // Linear regression slope over [0, 1, ..., n-1] indices vs values.
-    final n = _recentRecoveryScores.length;
-    final mx = (n - 1) / 2.0;
-    final my = _recentRecoveryScores.reduce((a, b) => a + b) / n;
-    var num = 0.0;
-    var den = 0.0;
-    for (var i = 0; i < n; i++) {
-      final dx = i - mx;
-      num += dx * (_recentRecoveryScores[i] - my);
-      den += dx * dx;
-    }
-    if (den == 0) return null;
-    return num / den;
-  }
-
-  /// Recent-7 mean Recovery Score, when at least three nights are
-  /// available. Used as a stability anchor in the Readiness fatigue
-  /// context.
-  static double? _recovery7dMean() {
-    if (_recentRecoveryScores.length < 3) return null;
-    final sum = _recentRecoveryScores.reduce((a, b) => a + b);
-    return sum / _recentRecoveryScores.length;
   }
 
   /// Attach overnight physiology (HRV / RHR) for a given calendar
@@ -1654,9 +1708,11 @@ class Baselines {
     }
   }
 
-  /// Attach a vendor workout's normalized strain (`[0, 1]`) for a
-  /// given calendar day. Subsequent readiness computes blend it into
-  /// the acute / chronic load ratio + consecutive overload counter.
+  /// Record a vendor workout's normalized strain (`[0, 1]`) for a
+  /// given calendar day. The history is kept and persisted, but the current
+  /// Readiness model does not use workload: it blends Recovery, Sleep and
+  /// overnight HR/HRV against baseline only, so a workout no longer moves
+  /// readiness.
   ///
   /// Hosts feed this from their workout backfill / live-event paths
   /// (e.g. WHOOP cycles, Garmin activities). When multiple workouts
@@ -1668,9 +1724,8 @@ class Baselines {
   /// before this call (the SDK's vendor-mapper already does this for
   /// the `recovery_score` SRM dimension, mirror that pattern).
   ///
-  /// Returns the freshly-computed Readiness Score when the host
-  /// already has a Recovery anchor — otherwise just stashes the
-  /// strain and returns `null`.
+  /// Returns the latest Readiness Score, unchanged by the workout, or null
+  /// when none has been computed yet.
   static ReadinessScoreResult? attachVendorWorkout({
     required DateTime occurredAt,
     required double strain01,
@@ -1684,15 +1739,7 @@ class Baselines {
       _strainByDay[day] = clamped;
     }
     _trimStrainHistory();
-    // Recompute readiness so consumers see the new strain reflected
-    // immediately. Skipped when no recovery anchor exists yet.
-    final r = _latestRecoveryScore;
-    if (r != null) {
-      _computeReadiness(r);
-      if (!_ctrl.isClosed) _ctrl.add(snapshot);
-      return _latestReadinessScore;
-    }
-    return null;
+    return _latestReadinessScore;
   }
 
   /// Day-key compatible with [_calendarDayFromMs] / [Synheart.epochDayFor]:
@@ -2040,81 +2087,48 @@ class Baselines {
     _strainByDay.removeWhere((day, _) => day < newest - 28);
   }
 
-  /// Acute (last 7 days) over chronic (last 28 days) strain ratio.
-  /// Returns null until at least 3 days of strain history exist.
-  static AcuteWorkloadContext? _acuteWorkloadContext() {
-    if (_strainByDay.length < 3) return null;
-    final newest = _strainByDay.keys.reduce((a, b) => a > b ? a : b);
-    double acuteSum = 0.0;
-    var acuteN = 0;
-    double chronicSum = 0.0;
-    var chronicN = 0;
-    for (final entry in _strainByDay.entries) {
-      final age = newest - entry.key;
-      if (age < 0 || age > 27) continue;
-      chronicSum += entry.value;
-      chronicN += 1;
-      if (age <= 6) {
-        acuteSum += entry.value;
-        acuteN += 1;
-      }
-    }
-    if (chronicN == 0 || acuteN == 0) return null;
-    final acute = acuteSum / acuteN;
-    final chronic = chronicSum / chronicN;
-    return AcuteWorkloadContext(
-      acuteLoad: acute,
-      chronicLoad: chronic,
-      acuteChronicRatio: chronic > 0 ? acute / chronic : null,
-    );
-  }
-
-  /// Trailing run of consecutive days at-or-above the high-strain
-  /// threshold ending at the most recent strain entry. Returns null
-  /// when there's no strain history.
-  static HistoryContext? _historyContext() {
-    if (_strainByDay.isEmpty) return null;
-    final newest = _strainByDay.keys.reduce((a, b) => a > b ? a : b);
-    var consecutive = 0;
-    for (var d = newest; ; d -= 1) {
-      final v = _strainByDay[d];
-      if (v == null) break;
-      if (v < _highStrainThreshold) break;
-      consecutive += 1;
-    }
-    // Days since the most recent rest day (strain below threshold).
-    int? daysSinceRest;
-    for (var d = newest; d >= newest - 27; d -= 1) {
-      final v = _strainByDay[d];
-      if (v != null && v < _highStrainThreshold) {
-        daysSinceRest = newest - d;
-        break;
-      }
-    }
-    if (consecutive == 0 && daysSinceRest == null) return null;
-    return HistoryContext(
-      consecutiveHighStrainDays: consecutive,
-      daysSinceRest: daysSinceRest,
-    );
-  }
-
-  /// Compute and stash a Readiness Score. Builds the Fatigue context
-  /// from the local Recovery ring and the Acute / History contexts
-  /// from the strain ring (when [attachVendorWorkout] has been called
-  /// at least once).
-  static void _computeReadiness(RecoveryScoreResult recovery) {
+  /// Compute and stash today's Readiness Score from the Recovery Score just
+  /// settled for the night ending on [day], that night's Sleep Score, and
+  /// the night's HR/HRV against the person's baselines.
+  ///
+  /// Readiness needs both scores. A night whose Sleep Score abstained gets
+  /// no readiness rather than one built on a made-up sleep value.
+  static void _computeReadiness(
+    RecoveryScoreResult recovery, {
+    required int day,
+    required OvernightPhysiology overnight,
+  }) {
     try {
+      final sleep = _attachedSleepFor(day);
+      final sleepScore = sleep?.score;
+      if (sleep == null || sleepScore == null) {
+        SynheartLogger.stream(
+          'Baselines: readiness skipped (no sleep score for night $day)',
+        );
+        return;
+      }
+      final base = _baselinesFromReference(_latestReference);
+      final hrSleep = overnight.overnightHrBpm;
+      final rmssdSleep = overnight.hrvRmssdMs;
       final input = ReadinessScoreInput(
         recoveryScore: recovery.score,
-        recoveryConfidence: recovery.confidence,
-        acuteWorkload: _acuteWorkloadContext(),
-        fatigue: FatigueContext(
-          recoverySlopePerDay: _recoverySlopePerDay(),
-          recovery7dMean: _recovery7dMean(),
-        ),
-        history: _historyContext(),
+        sleepScore: sleepScore,
+        // All four or none: the engine redistributes the alignment weight
+        // onto Recovery and Sleep when it is absent, which is honest; a
+        // partial alignment would not be.
+        alignment: base != null && hrSleep != null && rmssdSleep != null
+            ? OvernightAlignment(
+                hrSleepBpm: hrSleep,
+                hrBaseBpm: base.restingHrBpm,
+                rmssdSleepMs: rmssdSleep,
+                rmssdBaseMs: base.hrvRmssdMs,
+              )
+            : null,
+        recoveryColdStart: recovery.stage == RecoveryStage.firstDay,
+        sleepColdStart: sleep.mode == SleepScoreMode.coldStart,
+        baselineDays: _baselineDays(),
       );
-      final result = Synheart.computeReadinessScore(input);
+      final result = _scoreReadiness(day, input);
       if (result == null) {
         SynheartLogger.stream(
           'Baselines: readiness skipped (engine returned null)',
@@ -2124,7 +2138,8 @@ class Baselines {
       _latestReadinessScore = result;
       SynheartLogger.stream(
         'Baselines: readiness=${result.score} band=${result.band.wire} '
-        'conf=${result.confidence.toStringAsFixed(2)}',
+        'conf=${result.confidence.toStringAsFixed(2)} '
+        'alignment=${input.alignment == null ? 'none' : 'yes'}',
       );
     } catch (e, st) {
       SynheartLogger.stream(
@@ -2135,12 +2150,32 @@ class Baselines {
     }
   }
 
-  /// Public host hook to compute a Readiness Score with a custom
-  /// context (e.g. when the host has its own acute-load / history
-  /// data not surfaced through Baselines). The caller's Recovery
-  /// anchor is used as-is; the engine still merges in any fatigue
-  /// signals carried on the input. Returns the freshly-computed
-  /// result and stashes it as the new [latestReadinessScore].
+  /// The Sleep Score that claimed the night ending on [day]: the winning
+  /// provider's variant, as recorded for the alternates UI.
+  static SleepScoreResult? _attachedSleepFor(int day) {
+    final provider = _attachedKeys[day];
+    final byVariant = _scoresByNight[day];
+    if (provider == null || byVariant == null) return null;
+    final path = _attachedPaths[day];
+    for (final id in [provider, '${provider}_score']) {
+      final r = byVariant[id];
+      if (r != null && (path == null || r.path == path)) return r;
+    }
+    return byVariant[provider];
+  }
+
+  /// Days of HR/HRV history behind tonight's baseline: prior nights in the
+  /// window that carried overnight HR or HRV. Drives readiness confidence;
+  /// under 2 marks the baseline immature.
+  static int _baselineDays() {
+    final withSignal = _recentOvernight.where((o) => o.hasSignal).length;
+    return withSignal > 0 ? withSignal - 1 : 0;
+  }
+
+  /// Public host hook to compute a Readiness Score from the host's own
+  /// input (e.g. its own baselines for the alignment term). Returns the
+  /// result and stashes it as the new [latestReadinessScore]. It is not
+  /// queued for upload; [Synheart.attachReadinessScore] does that.
   static ReadinessScoreResult? computeReadinessWith({
     required ReadinessScoreInput input,
   }) {
@@ -2179,6 +2214,9 @@ class Baselines {
   ///   variant id that produced `latest_sleep`, so the Sleep card's
   ///   source badge and the `tonightAlternates` winner survive too.
   /// - `last_ingest_at_ms`: epoch-ms of the last successful ingest.
+  /// - `daily_upload_ledger`: the last night queued for upload per daily
+  ///   score kind and whether a frame carried it, so a relaunch neither
+  ///   resends nor re-rings nights already sent ([DailyScoreLedger]).
   static String exportRecoveryStateJson() {
     final map = <String, Object?>{
       'recent_recovery_scores': _recentRecoveryScores.toList(growable: false),
@@ -2198,6 +2236,7 @@ class Baselines {
       'last_sleep_source': _lastSource,
       'last_sleep_variant': _lastVariantId,
       'last_ingest_at_ms': _lastIngestAt?.millisecondsSinceEpoch,
+      'daily_upload_ledger': _ledger.toJson(),
     };
     return jsonEncode(map);
   }
@@ -2213,6 +2252,8 @@ class Baselines {
     try {
       final raw = jsonDecode(json);
       if (raw is! Map<String, Object?>) return;
+
+      _ledger.loadJson(raw['daily_upload_ledger']);
 
       final scores = raw['recent_recovery_scores'];
       if (scores is List) {
@@ -2415,20 +2456,6 @@ class Baselines {
     'pipeline_version': r.pipelineVersion,
   };
 
-  static Map<String, Object?> _readinessToJson(ReadinessScoreResult r) => {
-    'score': r.score,
-    'band': r.band.wire,
-    'recovery_anchor': r.recoveryAnchor,
-    'components': {
-      'recovery': r.components.recovery,
-      'acute_load': r.components.acuteLoad,
-      'fatigue': r.components.fatigue,
-      'history': r.components.history,
-    },
-    'confidence': r.confidence,
-    'explanation': r.explanation.map((f) => f.wire).toList(growable: false),
-    'model_id': r.modelId,
-    'model_version': r.modelVersion,
-    'pipeline_version': r.pipelineVersion,
-  };
+  static Map<String, Object?> _readinessToJson(ReadinessScoreResult r) =>
+      r.toJson();
 }
