@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-22
+
 ### Deprecated
 
 - **`CoreRuntimeBridge.wellnessJson()`.** Current runtimes no longer compute a
@@ -39,10 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Install hints now recommend runtime 0.39.0**, the first release with C ABI
-  2.1 and `synheart_core_allows_channel`. Runtimes from 0.20.0 up to 0.38.x
-  still initialise; they log as older than the bindings expect, and
-  `strictChannelConsent` has no effect on them.
+- **Install hints now recommend runtime 0.40.0.** It keeps collection and the
+  state it reports to the data inputs and outputs the app declared, and no
+  longer computes a Wellness score. Per-channel decisions
+  (`synheart_core_allows_channel`, C ABI 2.1) need runtime 0.39.0 or later.
+  Runtimes from 0.20.0 up still initialise; older than 0.39.0 they log as older
+  than the bindings expect, and `strictChannelConsent` has no effect on them.
 
 ## [0.17.2] - 2026-10-15
 
