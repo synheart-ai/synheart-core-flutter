@@ -354,6 +354,26 @@ collected — none of them makes a sensor readable.
 
 ---
 
+### 4.5 Ask again when the HSM Schema needs more
+
+When the app's published HSM Schema gains an input in a later version (say
+notification patterns), the runtime keeps that channel off until the person
+consents. It does not ask them; the app does:
+
+```dart
+if (Synheart.schemaNeedsConsent()) {
+  final needs = Synheart.hsmSchemaConsent()!;
+  // needs.channels, e.g. ['behavior.notification_patterns']
+  final form = Synheart.consentGetEditableFormTyped();
+  // Show the form, then submit the person's choice with consentSubmitFormTyped.
+}
+```
+
+Check it after `initialize` and after a form submit; the runtime refreshes the
+schema at both. A channel the person declined is not listed again, so this
+does not prompt on every launch. Submitting the form, whatever they choose,
+clears it for the version they saw.
+
 ## 5. Collect
 
 ```dart

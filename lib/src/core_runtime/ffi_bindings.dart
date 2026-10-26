@@ -738,6 +738,7 @@ class SynheartCoreFFI {
     // Referencing each field forces its initializer to run.
     coreLastError;
     allowsChannel;
+    hsmSchemaConsent;
     recordStudyConsent;
     baselineHydrateLocal;
     baselineExportOffline;
@@ -1206,6 +1207,17 @@ class SynheartCoreFFI {
       'synheart_core_allows_channel',
     ),
   );
+
+  /// What the app's HSM Schema needs from the person, as JSON
+  /// `{schema_version, needs_consent, channels}`. Null on runtimes older than
+  /// C ABI 4.1, which do not export it.
+  late final Pointer<Utf8> Function(Pointer<Void>)? hsmSchemaConsent =
+      _optional(
+        'synheart_core_hsm_schema_consent',
+        () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+          'synheart_core_hsm_schema_consent',
+        ),
+      );
   late final currentConsent = _lib
       .lookupFunction<_CurrentConsentC, _CurrentConsentDart>(
         'synheart_core_current_consent',

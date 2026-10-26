@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Synheart.schemaNeedsConsent()`: ask again when the app's HSM Schema
+  gains an input.** A newer version of the app's published HSM Schema can
+  declare an input the person was never asked about. The runtime keeps it off
+  until they consent, and now says so: `schemaNeedsConsent()` is true while
+  the schema declares channels the person has not consented to and was not
+  asked about when they last chose, and `hsmSchemaConsent()` returns them as
+  an `HsmSchemaConsent` (`schemaVersion`, `channels`). Show the consent form
+  again when it is true. A channel the person declined is not asked about
+  again. Needs a runtime with C ABI 4.1; with an older one, or none,
+  `schemaNeedsConsent()` is false and `hsmSchemaConsent()` null.
 - **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
   daily scores reach the cloud.** Each computes the score, as
   `computeRecoveryScore` / `computeReadinessScore` do, and queues it to ride

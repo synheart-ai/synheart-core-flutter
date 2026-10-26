@@ -142,6 +142,7 @@ export 'src/modules/capabilities/capability_module.dart';
 export 'src/modules/capabilities/capability_token.dart';
 export 'src/modules/consent/consent_module.dart';
 export 'src/modules/consent/consent_effective_state.dart';
+export 'src/modules/consent/hsm_schema_consent.dart';
 export 'src/modules/consent/consent_form.dart';
 export 'src/modules/consent/consent_type_meta.dart';
 export 'src/modules/consent/consent_profile.dart';
