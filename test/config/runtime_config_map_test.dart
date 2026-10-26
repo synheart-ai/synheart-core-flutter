@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:synheart_core/src/config/host_declarations.dart';
 import 'package:synheart_core/src/config/runtime_config_map.dart';
 import 'package:synheart_core/src/config/synheart_config.dart';
 import 'package:synheart_core/src/config/synheart_mode.dart';
@@ -148,6 +149,22 @@ void main() {
       final map = buildRuntimeConfigMap(SynheartConfig(appId: 'a'));
       expect(map.containsKey('emit_diagnostics'), isFalse);
       expect(map.containsKey('research_baseline'), isFalse);
+      expect(map.containsKey('model_backend'), isFalse);
+    });
+
+    test('modelBackend sends its wire name', () {
+      expect(
+        buildRuntimeConfigMap(
+          SynheartConfig(appId: 'a', modelBackend: ModelBackend.kinematicOnnx),
+        )['model_backend'],
+        'kinematic_onnx',
+      );
+      expect(
+        buildRuntimeConfigMap(
+          SynheartConfig(appId: 'a', modelBackend: ModelBackend.rulepackOnly),
+        )['model_backend'],
+        'rulepack_only',
+      );
     });
 
     test('emitDiagnostics sends the key the engine reads', () {

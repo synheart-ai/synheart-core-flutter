@@ -210,6 +210,10 @@ class SynheartConfig {
   /// zero" from "this head never received its evidence".
   final bool emitDiagnostics;
 
+  /// Which backend the engine's heads may use. Null leaves the runtime's
+  /// default (deterministic formulas only); see [ModelBackend].
+  final ModelBackend? modelBackend;
+
   /// Use the single-visit baseline profile (`d_min = 1`) without switching the
   /// whole instance into [SynheartMode.research].
   ///
@@ -302,6 +306,7 @@ class SynheartConfig {
     this.hostDeclarations = const HostDeclarations(),
     this.extraHeads = const <ExtraHead>[],
     this.emitDiagnostics = false,
+    this.modelBackend,
     this.researchBaseline = false,
     this.strictChannelConsent = false,
     this.windowMs,

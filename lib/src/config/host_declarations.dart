@@ -231,3 +231,19 @@ enum ExtraHead {
   final String wire;
   const ExtraHead(this.wire);
 }
+
+/// Which backend the engine's heads may use.
+///
+/// The engine default, used when [SynheartConfig.modelBackend] is null, is
+/// [rulepackOnly]: every head is a deterministic formula. [kinematicOnnx] lets
+/// the learned kinematic model report activity, postural and locomotion state,
+/// and keeps every other head on its formula. It only changes anything in a
+/// runtime built with ONNX support, and the kinematic heads still need to be
+/// enabled through [ExtraHead] with a declared accelerometer placement.
+enum ModelBackend {
+  rulepackOnly('rulepack_only'),
+  kinematicOnnx('kinematic_onnx');
+
+  final String wire;
+  const ModelBackend(this.wire);
+}
