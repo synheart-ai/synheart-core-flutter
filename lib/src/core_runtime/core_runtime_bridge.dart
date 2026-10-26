@@ -1165,6 +1165,8 @@ class CoreRuntimeBridge {
     'configId': _ffi.configId != null,
     'lastHsv': _ffi.lastHsv != null,
     'attachStrainScoreJson': _ffi.attachStrainScoreJson != null,
+    'attachRecoveryScoreJson': _ffi.attachRecoveryScoreJson != null,
+    'attachReadinessScoreJson': _ffi.attachReadinessScoreJson != null,
   };
 
   /// Push one rich behavior event as JSON. Returns the runtime's status
@@ -1511,6 +1513,42 @@ class CoreRuntimeBridge {
         );
       });
     });
+  }
+
+  /// Whether the runtime can queue a Recovery Score onto the next HSI.
+  bool get attachRecoveryScoreJsonAvailable =>
+      _ffi.attachRecoveryScoreJson != null;
+
+  /// Whether the runtime can queue a Readiness Score onto the next HSI.
+  bool get attachReadinessScoreJsonAvailable =>
+      _ffi.attachReadinessScoreJson != null;
+
+  /// Compute a daily Recovery Score from [inputJson] and queue it to ride the
+  /// next emitted HSI as the `recovery` reading, which is how it reaches the
+  /// cloud. Returns the `RecoveryScoreResult` JSON, the same value
+  /// [recoveryScoreComputeJson] returns.
+  ///
+  /// Null when the runtime lacks the symbol (check
+  /// [attachRecoveryScoreJsonAvailable]), when the input does not parse, or
+  /// when the night has no overnight HR/HRV and the score abstains. An
+  /// abstention leaves no native error behind; a parse failure does.
+  ///
+  /// Distinct from [attachRecoveryScoreToday], which only feeds
+  /// personalization. A host that wants both calls both.
+  String? attachRecoveryScoreJson(String inputJson) {
+    final fn = _ffi.attachRecoveryScoreJson;
+    if (fn == null) return null;
+    return _withCString(inputJson, (p) => _readOrNote(fn(_handle, p)));
+  }
+
+  /// Compute a daily Readiness Score from [inputJson] and queue it to ride
+  /// the next emitted HSI as the `readiness` reading. Returns the
+  /// `ReadinessScoreResult` JSON, or null when the runtime lacks the symbol
+  /// (check [attachReadinessScoreJsonAvailable]) or the input does not parse.
+  String? attachReadinessScoreJson(String inputJson) {
+    final fn = _ffi.attachReadinessScoreJson;
+    if (fn == null) return null;
+    return _withCString(inputJson, (p) => _readOrNote(fn(_handle, p)));
   }
 
   /// Queue a batch `SleepScoreResult` JSON to ride the next HSI and

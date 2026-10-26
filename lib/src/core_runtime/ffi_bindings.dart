@@ -1549,6 +1549,23 @@ class SynheartCoreFFI {
       .lookupFunction<_SleepScoreComputeTracedC, _SleepScoreComputeTracedDart>(
         'synheart_core_readiness_score_compute_json_traced',
       );
+  // Compute AND queue the score to ride the next emitted HSI as a
+  // `recovery` / `readiness` reading on `axes.physiological`. Take the
+  // *input* JSON, not the result: the runtime's result types don't
+  // deserialize, so recomputing is its only lossless path. Built only into
+  // `physio` runtimes, hence optional.
+  late final attachRecoveryScoreJson = _optional(
+    'synheart_core_attach_recovery_score_json',
+    () => _lib.lookupFunction<_SleepScoreComputeC, _SleepScoreComputeDart>(
+      'synheart_core_attach_recovery_score_json',
+    ),
+  );
+  late final attachReadinessScoreJson = _optional(
+    'synheart_core_attach_readiness_score_json',
+    () => _lib.lookupFunction<_SleepScoreComputeC, _SleepScoreComputeDart>(
+      'synheart_core_attach_readiness_score_json',
+    ),
+  );
   late final attachSleepScoreJson = _lib
       .lookupFunction<_LoadSnapshotC, _LoadSnapshotDart>(
         'synheart_core_attach_sleep_score_json',

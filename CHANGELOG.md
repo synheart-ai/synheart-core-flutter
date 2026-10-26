@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
+  daily scores reach the cloud.** Each computes the score, as
+  `computeRecoveryScore` / `computeReadinessScore` do, and queues it to ride
+  the next emitted HSI window as the `recovery` / `readiness` reading, which
+  is how a daily score is uploaded. Until now nothing queued them: the
+  compute calls are stateless, and `attachRecoveryScoreToday` only feeds
+  personalization. Check `attachRecoveryScoreAvailable` /
+  `attachReadinessScoreAvailable`; a runtime built without the physiological
+  feature set returns null.
 - **`Synheart.syncStatus()`: typed sync status.** Returns a `SyncStatus` with
   the runtime 0.39.0 fields (`syncSpaceId`, `pendingCount`, `lastSuccessMs`,
   `srkReady`, `accountOwned`). Fields an older runtime never sent stay `null`.
@@ -33,6 +42,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Synheart.getSyncStatus()`**, deprecated since 0.11 and promised for
   removal in 0.12.0. Use `Synheart.syncStatus()`. `SyncStatus` is now the
   richer type above; `SyncStatus(enabled: ...)` still constructs.
+
+### Fixed
+
+- **Readiness computes again (breaking model change).** The SDK's readiness
+  models no longer matched the engine: since engine 0.12.0 (runtime 0.20.0,
+  this SDK's minimum) readiness takes Recovery, Sleep and overnight HR/HRV
+  against baseline, and the old input (recovery, acute workload, fatigue,
+  history) failed every compute with `missing field sleep_score`. The models
+  now mirror the engine:
+  - `ReadinessScoreInput` takes `recoveryScore`, `sleepScore`, an optional
+    `OvernightAlignment`, `recoveryColdStart`, `sleepColdStart` and
+    `baselineDays`.
+  - `ReadinessScoreResult` adds `sleepAnchor`; `ReadinessComponents` is
+    `recovery`, `sleep` and the three alignment values; `ReadinessFactor`
+    is the engine's list.
+  - `ReadinessBand` keeps its names, which are each band's recommendation;
+    `wire` is now the engine's (`low`, `reduced`, `normal`, `high`), and an
+    unknown band follows the score instead of defaulting to `rest`.
+  - Removed `AcuteWorkloadContext`, `FatigueContext`, `HistoryContext` and
+    `ReadinessScoreInput.fromRecovery`.
+  - `Baselines` builds the input from the night's Sleep Score, its Recovery
+    Score and overnight HR/HRV against the wearable reference. A night with
+    no Sleep Score gets no readiness. `attachVendorWorkout` still records
+    strain but no longer recomputes readiness, which does not use workload.
+- **`Baselines` uploads Recovery and Readiness.** The scores it settles after
+  each sleep ingest are now queued for upload, not only computed.
+- **A relaunch no longer re-sends or double-counts nights already sent.**
+  Re-pulling the last month of nights attached each one again: the newest
+  night was uploaded a second time and every night was pushed onto the
+  engine's 7-night sleep ring again, skewing its median. `Baselines` now keeps
+  a ledger of the last night queued per score kind, and whether an emitted
+  frame carried it, in `exportRecoveryStateJson()`. A night already sent with
+  the same score rebuilds local history but is not attached again; a score
+  that no frame carried before the app stopped is queued once more; an older
+  night never replaces a newer one in the runtime's single pending slot.
+  Hosts that already persist `exportRecoveryStateJson()` need no change.
 
 ## [0.18.1] - 2026-10-23
 
