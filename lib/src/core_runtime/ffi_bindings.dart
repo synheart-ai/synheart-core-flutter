@@ -34,10 +34,26 @@ typedef _IsRunningC = Int32 Function(Pointer<Void> handle);
 typedef _IsRunningDart = int Function(Pointer<Void> handle);
 
 // Sensor push
+// ABI 4.0: every sample push carries its provider (nullable; the runtime reads
+// null as "default_sensor") and `utcOffsetMin`, the person's offset from UTC in
+// force at the sample (±840, else the sample is dropped). The personal
+// baselines file samples under the local day that offset gives.
 typedef _PushRrC =
-    Void Function(Pointer<Void> h, Int64 ts, Double rr, Pointer<Utf8> provider);
+    Void Function(
+      Pointer<Void> h,
+      Int64 ts,
+      Double rr,
+      Pointer<Utf8> provider,
+      Int32 utcOffsetMin,
+    );
 typedef _PushRrDart =
-    void Function(Pointer<Void> h, int ts, double rr, Pointer<Utf8> provider);
+    void Function(
+      Pointer<Void> h,
+      int ts,
+      double rr,
+      Pointer<Utf8> provider,
+      int utcOffsetMin,
+    );
 // Batched RR push: `rr` points to `len` doubles (RR intervals in ms) that
 // arrived together in one sensor notification; `order` is 0=oldest-first
 // (BLE HRM), 1=newest-first. Maps `size_t` → `Size`.
@@ -49,6 +65,7 @@ typedef _PushRrBatchC =
       Size len,
       Int32 order,
       Pointer<Utf8> provider,
+      Int32 utcOffsetMin,
     );
 typedef _PushRrBatchDart =
     void Function(
@@ -58,9 +75,24 @@ typedef _PushRrBatchDart =
       int len,
       int order,
       Pointer<Utf8> provider,
+      int utcOffsetMin,
     );
-typedef _PushHrC = Void Function(Pointer<Void> h, Int64 ts, Double bpm);
-typedef _PushHrDart = void Function(Pointer<Void> h, int ts, double bpm);
+typedef _PushHrC =
+    Void Function(
+      Pointer<Void> h,
+      Int64 ts,
+      Double bpm,
+      Pointer<Utf8> provider,
+      Int32 utcOffsetMin,
+    );
+typedef _PushHrDart =
+    void Function(
+      Pointer<Void> h,
+      int ts,
+      double bpm,
+      Pointer<Utf8> provider,
+      int utcOffsetMin,
+    );
 typedef _EnsurePipelineC = Void Function(Pointer<Void> h);
 typedef _EnsurePipelineDart = void Function(Pointer<Void> h);
 typedef _TickC = Pointer<Utf8> Function(Pointer<Void> h, Int64 nowMs);
@@ -88,13 +120,25 @@ typedef _PushVendorVitalsC =
 typedef _PushVendorVitalsDart =
     void Function(Pointer<Void> h, int ts, double spo2, double respiration);
 typedef _PushAccelC =
-    Void Function(Pointer<Void> h, Int64 ts, Double x, Double y, Double z);
+    Void Function(
+      Pointer<Void> h,
+      Int64 ts,
+      Double x,
+      Double y,
+      Double z,
+      Pointer<Utf8> provider,
+      Int32 utcOffsetMin,
+    );
 typedef _PushAccelDart =
-    void Function(Pointer<Void> h, int ts, double x, double y, double z);
-typedef _PushWristAccelC =
-    Void Function(Pointer<Void> h, Int64 ts, Double x, Double y, Double z);
-typedef _PushWristAccelDart =
-    void Function(Pointer<Void> h, int ts, double x, double y, double z);
+    void Function(
+      Pointer<Void> h,
+      int ts,
+      double x,
+      double y,
+      double z,
+      Pointer<Utf8> provider,
+      int utcOffsetMin,
+    );
 typedef _PushWornAccelC =
     Void Function(
       Pointer<Void> h,
@@ -103,6 +147,8 @@ typedef _PushWornAccelC =
       Double y,
       Double z,
       Int32 placement,
+      Pointer<Utf8> provider,
+      Int32 utcOffsetMin,
     );
 typedef _PushWornAccelDart =
     void Function(
@@ -112,6 +158,8 @@ typedef _PushWornAccelDart =
       double y,
       double z,
       int placement,
+      Pointer<Utf8> provider,
+      int utcOffsetMin,
     );
 typedef _SetAccelPlacementC = Void Function(Pointer<Void> h, Int32 placement);
 typedef _SetAccelPlacementDart = void Function(Pointer<Void> h, int placement);
@@ -135,8 +183,6 @@ typedef _PushSpeedDart =
     void Function(Pointer<Void> h, int ts, double speedMps);
 typedef _DeclareRestWindowC = Void Function(Pointer<Void> h, Int64 tsMs);
 typedef _DeclareRestWindowDart = void Function(Pointer<Void> h, int tsMs);
-typedef _RollDayC = Int32 Function(Pointer<Void> h, Int32 dayIndex);
-typedef _RollDayDart = int Function(Pointer<Void> h, int dayIndex);
 // `tick_all` and `flush_pending` both return a JSON *array* of HSI documents,
 // oldest first — unlike `tick`, which returns at most one window.
 typedef _DrainC = Pointer<Utf8> Function(Pointer<Void> h, Int64 nowMs);
@@ -195,28 +241,55 @@ typedef _PersonalizationContextJsonDart =
 // Daily Recovery Score attach.
 typedef _AttachRecoveryScoreC = Int32 Function(Pointer<Void> h, Uint8 score);
 typedef _AttachRecoveryScoreDart = int Function(Pointer<Void> h, int score);
+// ABI 4.0: personal-baseline day calls take a calendar date in the person's
+// own time zone (a night belongs to the date the person woke on).
 typedef _SrmPushWearableDailyC =
-    Void Function(
+    Int32 Function(
       Pointer<Void> h,
-      Pointer<Utf8> dim,
-      Int32 dayIndex,
+      Pointer<Utf8> provider,
+      Pointer<Utf8> metric,
+      Int32 year,
+      Int32 month,
+      Int32 day,
       Double value,
-      Double confidence,
-      Int32 fidelity,
+      Int32 vendorSummary,
     );
 typedef _SrmPushWearableDailyDart =
-    void Function(
+    int Function(
       Pointer<Void> h,
-      Pointer<Utf8> dim,
-      int dayIndex,
+      Pointer<Utf8> provider,
+      Pointer<Utf8> metric,
+      int year,
+      int month,
+      int day,
       double value,
-      double confidence,
-      int fidelity,
+      int vendorSummary,
     );
-typedef _SrmTriggerRecomputeC =
-    Void Function(Pointer<Void> h, Int32 trigger, Int32 asOfDay);
-typedef _SrmTriggerRecomputeDart =
-    void Function(Pointer<Void> h, int trigger, int asOfDay);
+typedef _DateCallC =
+    Int32 Function(Pointer<Void> h, Int32 year, Int32 month, Int32 day);
+typedef _DateCallDart =
+    int Function(Pointer<Void> h, int year, int month, int day);
+typedef _DateJsonC =
+    Pointer<Utf8> Function(Pointer<Void> h, Int32 year, Int32 month, Int32 day);
+typedef _DateJsonDart =
+    Pointer<Utf8> Function(Pointer<Void> h, int year, int month, int day);
+typedef _SetDayTypeC =
+    Int32 Function(
+      Pointer<Void> h,
+      Int32 year,
+      Int32 month,
+      Int32 day,
+      Int32 dayType,
+    );
+typedef _SetDayTypeDart =
+    int Function(Pointer<Void> h, int year, int month, int day, int dayType);
+// A level report (input capture, call state): `on` is 0/1 from `ts` on.
+typedef _LevelAtC = Int32 Function(Pointer<Void> h, Int32 on, Int64 ts);
+typedef _LevelAtDart = int Function(Pointer<Void> h, int on, int ts);
+typedef _TsCallC = Int32 Function(Pointer<Void> h, Int64 ts);
+typedef _TsCallDart = int Function(Pointer<Void> h, int ts);
+typedef _TsJsonC = Pointer<Utf8> Function(Pointer<Void> h, Int64 ts);
+typedef _TsJsonDart = Pointer<Utf8> Function(Pointer<Void> h, int ts);
 
 // Consent
 typedef _ConsentStrC = Int32 Function(Pointer<Void> h, Pointer<Utf8> ct);
@@ -1036,10 +1109,9 @@ class SynheartCoreFFI {
   late final pushAccel = _lib.lookupFunction<_PushAccelC, _PushAccelDart>(
     'synheart_core_push_accel',
   );
-  late final pushWristAccel = _lib
-      .lookupFunction<_PushWristAccelC, _PushWristAccelDart>(
-        'synheart_core_push_wrist_accel',
-      );
+  late final pushWristAccel = _lib.lookupFunction<_PushAccelC, _PushAccelDart>(
+    'synheart_core_push_wrist_accel',
+  );
   late final pushWornAccel = _lib
       .lookupFunction<_PushWornAccelC, _PushWornAccelDart>(
         'synheart_core_push_worn_accel',
@@ -1104,11 +1176,6 @@ class SynheartCoreFFI {
           'synheart_core_flush_pending',
         ),
       );
-  late final int Function(Pointer<Void>, int)? rollDay = _optional(
-    'synheart_core_roll_day',
-    () =>
-        _lib.lookupFunction<_RollDayC, _RollDayDart>('synheart_core_roll_day'),
-  );
   late final Pointer<Utf8> Function(Pointer<Void>)? exportSessionState =
       _optional(
         'synheart_core_export_session_state',
@@ -1140,6 +1207,16 @@ class SynheartCoreFFI {
         'synheart_core_attach_strain_score_json',
         () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
           'synheart_core_attach_strain_score_json',
+        ),
+      );
+
+  /// Scores the local day the engine closed last (C ABI 4.0, where the engine
+  /// closes days itself) and queues it for the next frame.
+  late final Pointer<Utf8> Function(Pointer<Void>)? attachClosedDayStrainJson =
+      _optional(
+        'synheart_core_attach_closed_day_strain_json',
+        () => _lib.lookupFunction<_ReadStringC, _ReadStringDart>(
+          'synheart_core_attach_closed_day_strain_json',
         ),
       );
 
@@ -1183,10 +1260,91 @@ class SynheartCoreFFI {
       .lookupFunction<_SrmPushWearableDailyC, _SrmPushWearableDailyDart>(
         'synheart_core_srm_push_wearable_daily',
       );
-  late final srmTriggerWearableRecompute = _lib
-      .lookupFunction<_SrmTriggerRecomputeC, _SrmTriggerRecomputeDart>(
-        'synheart_core_srm_trigger_wearable_recompute',
-      );
+  late final srmRefreshWearableReference = _optional(
+    'synheart_core_srm_refresh_wearable_reference',
+    () => _lib.lookupFunction<_DateCallC, _DateCallDart>(
+      'synheart_core_srm_refresh_wearable_reference',
+    ),
+  );
+
+  // ── Personal baselines (C ABI 3.1–4.0) ──────────────────────────────
+  //
+  // Optional: several are compiled only into feature builds, and each needs a
+  // running pipeline (-1 or NULL without one).
+  late final srmSetDayType = _optional(
+    'synheart_core_srm_set_day_type',
+    () => _lib.lookupFunction<_SetDayTypeC, _SetDayTypeDart>(
+      'synheart_core_srm_set_day_type',
+    ),
+  );
+  late final baselineWindowDigestJson = _optional(
+    'synheart_core_baseline_window_digest_json',
+    () => _lib.lookupFunction<_DateJsonC, _DateJsonDart>(
+      'synheart_core_baseline_window_digest_json',
+    ),
+  );
+  late final srmDrainEventsJson = _optional(
+    'synheart_core_srm_drain_events_json',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_srm_drain_events_json',
+    ),
+  );
+  late final srmForgetBaselines = _optional(
+    'synheart_core_srm_forget_baselines',
+    () => _lib.lookupFunction<_LoadSnapshotC, _LoadSnapshotDart>(
+      'synheart_core_srm_forget_baselines',
+    ),
+  );
+  late final srmRegisterDirection = _optional(
+    'synheart_core_srm_register_direction',
+    () => _lib.lookupFunction<_SleepScoreComputeC, _SleepScoreComputeDart>(
+      'synheart_core_srm_register_direction',
+    ),
+  );
+  late final baselineBeginRestBlock = _optional(
+    'synheart_core_baseline_begin_rest_block',
+    () => _lib.lookupFunction<_TsCallC, _TsCallDart>(
+      'synheart_core_baseline_begin_rest_block',
+    ),
+  );
+  late final baselineProfileJson = _optional(
+    'synheart_core_baseline_profile_json',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_baseline_profile_json',
+    ),
+  );
+  late final baselineRhythmJson = _optional(
+    'synheart_core_baseline_rhythm_json',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_baseline_rhythm_json',
+    ),
+  );
+  late final baselineRequirementsJson = _optional(
+    'synheart_core_baseline_requirements_json',
+    () => _lib.lookupFunction<_TsJsonC, _TsJsonDart>(
+      'synheart_core_baseline_requirements_json',
+    ),
+  );
+
+  // ── Input envelope and level reports (C ABI 3.2–4.0) ────────────────
+  late final pushInputsJson = _optional(
+    'synheart_core_push_inputs_json',
+    () => _lib.lookupFunction<_SleepScoreComputeC, _SleepScoreComputeDart>(
+      'synheart_core_push_inputs_json',
+    ),
+  );
+  late final setInputCapture = _optional(
+    'synheart_core_set_input_capture',
+    () => _lib.lookupFunction<_LevelAtC, _LevelAtDart>(
+      'synheart_core_set_input_capture',
+    ),
+  );
+  late final setCallActive = _optional(
+    'synheart_core_set_call_active',
+    () => _lib.lookupFunction<_LevelAtC, _LevelAtDart>(
+      'synheart_core_set_call_active',
+    ),
+  );
 
   late final grantConsent = _lib.lookupFunction<_ConsentStrC, _ConsentStrDart>(
     'synheart_core_grant_consent',
@@ -1521,14 +1679,20 @@ class SynheartCoreFFI {
   late final baselinesJson = _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
     'synheart_core_baselines_json',
   );
-  late final exportSrmSnapshot = _lib
-      .lookupFunction<_JsonReturnC, _JsonReturnDart>(
-        'synheart_core_export_srm_snapshot',
-      );
-  late final loadSrmSnapshot = _lib
-      .lookupFunction<_LoadSnapshotC, _LoadSnapshotDart>(
-        'synheart_core_load_srm_snapshot',
-      );
+  // One opaque snapshot of every personal baseline (C ABI 3.0+), base64 text.
+  // Replaces the SRM and longitudinal JSON snapshot pairs.
+  late final exportBaselineSnapshot = _optional(
+    'synheart_core_export_baseline_snapshot',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_export_baseline_snapshot',
+    ),
+  );
+  late final loadBaselineSnapshot = _optional(
+    'synheart_core_load_baseline_snapshot',
+    () => _lib.lookupFunction<_LoadSnapshotC, _LoadSnapshotDart>(
+      'synheart_core_load_baseline_snapshot',
+    ),
+  );
 
   // ── Batch nightly sleep score ──
   late final sleepScoreComputeJson = _lib
@@ -1593,14 +1757,6 @@ class SynheartCoreFFI {
   late final lastSleepScoreJson = _lib
       .lookupFunction<_JsonReturnC, _JsonReturnDart>(
         'synheart_core_last_sleep_score_json',
-      );
-  late final exportLongitudinalSnapshot = _lib
-      .lookupFunction<_JsonReturnC, _JsonReturnDart>(
-        'synheart_core_export_longitudinal_snapshot',
-      );
-  late final loadLongitudinalSnapshot = _lib
-      .lookupFunction<_LoadSnapshotC, _LoadSnapshotDart>(
-        'synheart_core_load_longitudinal_snapshot',
       );
   late final wearableReferenceJson = _lib
       .lookupFunction<_JsonReturnC, _JsonReturnDart>(

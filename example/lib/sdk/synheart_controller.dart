@@ -420,19 +420,6 @@ class SynheartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The `device_class` this host stores its SRM snapshot under.
-  ///
-  /// Kept separate from the declaration itself, because the two answer
-  /// different questions. The runtime resolves `"auto"` to a class through its
-  /// own tables and rejects a cross-class SRM load with
-  /// `ERR_SRM_CONFIG_MISMATCH` — so the host needs a stable file key even
-  /// while it declares `"auto"`, and a phone and a tablet must not share one
-  /// or they take turns invalidating each other's baseline.
-  String get hostDeviceClass => switch (defaultTargetPlatform) {
-    TargetPlatform.iOS || TargetPlatform.android => 'phone',
-    _ => 'desktop',
-  };
-
   /// Validate the config and load the native runtime.
   ///
   /// `autoStart: false` is deliberate — initializing must not begin collecting.
@@ -455,10 +442,7 @@ class SynheartController extends ChangeNotifier {
       // context baseline has already counted a window against the wrong
       // history. Doing it at initialize() rather than at startSession() is
       // what makes that ordering unconditional.
-      await host.restore(
-        subjectId: _subjectId ?? '',
-        deviceClass: hostDeviceClass,
-      );
+      await host.restore(subjectId: _subjectId ?? '');
 
       _lifecycleListener ??= AppLifecycleListener(
         onPause: () => host.onBackgrounded(),

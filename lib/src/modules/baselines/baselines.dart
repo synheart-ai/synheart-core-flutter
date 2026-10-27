@@ -10,6 +10,7 @@ import '../../models/recovery_score.dart';
 import '../../models/sleep_questionnaire.dart';
 import '../../models/sleep_score.dart';
 import '../../resilience/synheart_resilience.dart' show HrvSample, SleepWindow;
+import '../../models/daily_metric.dart';
 import 'daily_score_ledger.dart';
 import '../../synheart.dart';
 import 'baselines_snapshot.dart';
@@ -468,13 +469,8 @@ class Baselines {
   /// that's clearly populated.
   static DateTime? get lastIngestAt => _lastIngestAt;
 
-  /// Point-in-time snapshot of the current baseline state.
-  ///
-  /// Reads the cached `_latestScore` / `_latestReference` and parses
-  /// the Path-B ring out of the longitudinal snapshot via FFI. The
-  /// ring update is the cheap one (the snapshot is already kept
-  /// in-memory by the engine); the JSON round-trip costs ~1 ms,
-  /// fine for UI-driven calls.
+  /// Point-in-time snapshot of the current baseline state, from the cached
+  /// scores and the local mirror of the Path-B ring.
   static BaselinesSnapshot get snapshot => BaselinesSnapshot(
     reference: _latestReference,
     latestSleepScore: _latestScore,
@@ -486,31 +482,11 @@ class Baselines {
 
   static List<int> _readRecentRing() {
     if (!_ringHydrated) {
-      // First read this process: seed the local mirror from the
-      // engine's persisted snapshot so a fresh launch shows the
-      // already-logged nights. Skipped after [reset].
-      final raw = Synheart.longitudinalSnapshotJson;
-      if (raw != null) {
-        try {
-          final v = jsonDecode(raw);
-          if (v is Map && v['recent_sleep_score_ring'] is List) {
-            _localRing
-              ..clear()
-              ..addAll(
-                (v['recent_sleep_score_ring'] as List).whereType<num>().map(
-                  (n) => n.toInt(),
-                ),
-              );
-            _localRingDays
-              ..clear()
-              ..addAll(List<int>.filled(_localRing.length, -1));
-          }
-        } catch (_) {}
-      }
-      // Native snapshot empty (subject-scoped store unavailable for this
-      // subject — signed-out / per-device, or a fresh process before the
-      // engine restores) — fall back to the nights ring persisted in the host
-      // recovery blob so already-logged nights still surface on a cold launch.
+      // First read this process: seed the local mirror from the ring the
+      // host persisted with [exportRecoveryStateJson]. The engine keeps its
+      // own copy inside the sealed baseline snapshot, which is opaque, so
+      // the host copy is the readable one; the runtime restores the engine's
+      // at startup, so the two stay in step. Skipped after [reset].
       if (_localRing.isEmpty &&
           _persistedRecentRing != null &&
           _persistedRecentRing!.isNotEmpty) {
@@ -797,6 +773,7 @@ class Baselines {
               // visible baselines stuck on whatever the first sync
               // captured.
               _pushDailyToRuntimeSrm(
+                provider: provider,
                 wakeDayIndex: dayKey,
                 overnight: tonightOvernight,
                 raw: v.raw,
@@ -846,6 +823,7 @@ class Baselines {
               final extracted = _extractOvernightPhysiology(provider, payload);
               final dayKey = _absDayFromWakeCalendar(v.raw.wakeCalendarDate);
               _pushDailyToRuntimeSrm(
+                provider: provider,
                 wakeDayIndex: dayKey,
                 overnight: OvernightPhysiology(
                   hrvRmssdMs: extracted.hrvRmssdMs,
@@ -977,6 +955,7 @@ class Baselines {
                 // winning view (longitudinal SRM dedupes by
                 // day_index, so this overwrites cleanly).
                 _pushDailyToRuntimeSrm(
+                  provider: provider,
                   wakeDayIndex: dayKey,
                   overnight: tonightOvernight,
                   raw: v.raw,
@@ -1952,126 +1931,71 @@ class Baselines {
   /// `wakeCalendarDate`. The encoding is
   /// `wakeCalendarDate = (ms ÷ 86400000) − _wakeDayAnchor + 20100`
   /// so the inverse is what this returns. Use everywhere we need to
-  /// Push one night's vendor-derived metrics into the runtime SRM.
+  /// Write one night's vendor-derived metrics into the personal baselines,
+  /// under the night's wake date, from [provider].
   ///
-  /// Routes through `Synheart.srmPushWearableDaily` (which lands in
-  /// the longitudinal SRM and, via the Synheart Runtime's
-  /// wearable-daily ingest path, the live SRM that powers the visible
-  /// 11-baseline readout). Triggers a recompute
-  /// at the end so the next inference window picks up the fresh
-  /// `WearableReference`.
+  /// Writing a date again replaces it, so this is safe to call more than
+  /// once for a night (initial attach, same-source refresh and
+  /// priority-evict all route here). Ends with one reference refresh so the
+  /// next window reads the new values.
   ///
-  /// Idempotent at the SRM layer: pushing the same `dayIndex` twice
-  /// just refreshes the value (longitudinal buffers dedupe by
-  /// day_index). Safe to call multiple times for the same night
-  /// (initial attach + same-source refresh + priority-evict all
-  /// route here).
+  /// [wakeDayIndex] is the UTC day of the night's timestamp (see
+  /// [_absDayFromWakeCalendar]). Hosts pass the wake day's local noon as
+  /// that timestamp, which falls on the same UTC date in every zone within
+  /// ±12 h, so its calendar fields are the person's local wake date.
   ///
-  /// Pulls totals out of an `AggregatedNight` (via `raw.detail`).
-  /// `SegmentedNight` and `VendorScoreNight` skip the totals push
-  /// silently — totals require summed minutes per stage which
-  /// segmented payloads don't pre-compute and vendor-score
-  /// payloads don't carry. The overnight HR/HRV push still fires
-  /// regardless of the night's shape since those come out of the
-  /// per-provider extractor, not `raw.detail`.
+  /// Totals come from an `AggregatedNight` (via `raw.detail`);
+  /// `SegmentedNight` and `VendorScoreNight` carry none, so only their
+  /// overnight HR/HRV (from the per-provider extractor) is written.
   static void _pushDailyToRuntimeSrm({
+    required String provider,
     required int wakeDayIndex,
     required OvernightPhysiology overnight,
     required NightRaw raw,
   }) {
+    final date = DateTime.fromMillisecondsSinceEpoch(
+      wakeDayIndex * 86400000,
+      isUtc: true,
+    );
     var pushed = false;
+    void push(String metric, double? value) {
+      if (value == null || value <= 0) return;
+      final rc = Synheart.srmPushWearableDaily(
+        provider: provider,
+        metric: metric,
+        date: date,
+        value: value,
+      );
+      // 5002 (out of bounds / stream not permitted) is the runtime refusing
+      // one value, not a failure of the night; log it and go on.
+      if (rc != 0) {
+        SynheartLogger.stream(
+          'Baselines: daily $metric for $provider refused (rc=$rc)',
+        );
+      }
+      pushed = true;
+    }
 
-    if (overnight.hrvSdnnMs != null && overnight.hrvSdnnMs! > 0) {
-      // Apple Health (HKHeartRateVariabilitySDNN) is currently the
-      // only source feeding this dimension; WHOOP/Garmin/Health
-      // Connect ship RMSSD only. Routes through the longitudinal
-      // `hrv_sdnn` dimension which the engine bridge maps to
-      // `hrv.sdnn_ms` in the live SRM (lights up the
-      // "HRV (long-term)" baseline card).
-      Synheart.srmPushWearableDaily(
-        dimension: 'hrv_sdnn',
-        dayIndex: wakeDayIndex,
-        value: overnight.hrvSdnnMs!,
-      );
-      pushed = true;
-    }
-    if (overnight.hrStdBpm != null && overnight.hrStdBpm! > 0) {
-      // Std-bpm of the day's HR trace. Backfilled from HealthKit /
-      // Health Connect HR samples; lights up the "Heart rate
-      // variation" baseline card. Engine bridges `hrv_hr_std_bpm` →
-      // `hrv.hr_std_bpm` in the live SRM.
-      Synheart.srmPushWearableDaily(
-        dimension: 'hrv_hr_std_bpm',
-        dayIndex: wakeDayIndex,
-        value: overnight.hrStdBpm!,
-      );
-      pushed = true;
-    }
-    if (overnight.stepsCount != null && overnight.stepsCount! > 0) {
-      // Daily step total. Engine bridges `motion_steps_est` →
-      // `motion.steps_est` in the live SRM (lights up the
-      // "Step activity" baseline card).
-      Synheart.srmPushWearableDaily(
-        dimension: 'motion_steps_est',
-        dayIndex: wakeDayIndex,
-        value: overnight.stepsCount!,
-      );
-      pushed = true;
-    }
-    if (overnight.hrvRmssdMs != null && overnight.hrvRmssdMs! > 0) {
-      Synheart.srmPushWearableDaily(
-        dimension: 'hrv_rmssd',
-        dayIndex: wakeDayIndex,
-        value: overnight.hrvRmssdMs!,
-      );
-      pushed = true;
-    }
-    if (overnight.overnightHrBpm != null && overnight.overnightHrBpm! > 0) {
-      Synheart.srmPushWearableDaily(
-        dimension: 'resting_hr',
-        dayIndex: wakeDayIndex,
-        value: overnight.overnightHrBpm!,
-      );
-      pushed = true;
-    }
+    // Apple Health (HKHeartRateVariabilitySDNN) is the SDNN source;
+    // WHOOP/Garmin/Health Connect ship RMSSD.
+    push(DailyMetric.overnightSdnnMs, overnight.hrvSdnnMs);
+    push(DailyMetric.overnightHrSdBpm, overnight.hrStdBpm);
+    push(DailyMetric.stepsCount, overnight.stepsCount);
+    push(DailyMetric.overnightRmssdMs, overnight.hrvRmssdMs);
+    push(DailyMetric.restingHrBpm, overnight.overnightHrBpm);
 
     final detail = raw.detail;
     if (detail is AggregatedNight) {
       final totals = detail.totals;
-      if (totals.totalSleepMinutes > 0) {
-        // sleep_need is in seconds (per the physiology spec).
-        Synheart.srmPushWearableDaily(
-          dimension: 'sleep_need',
-          dayIndex: wakeDayIndex,
-          value: totals.totalSleepMinutes * 60.0,
-        );
-        pushed = true;
-      }
-      if (totals.deepSleepMinutes != null && totals.deepSleepMinutes! > 0) {
-        Synheart.srmPushWearableDaily(
-          dimension: 'deep_sleep_min',
-          dayIndex: wakeDayIndex,
-          value: totals.deepSleepMinutes!,
-        );
-        pushed = true;
-      }
-      if (totals.remSleepMinutes != null && totals.remSleepMinutes! > 0) {
-        Synheart.srmPushWearableDaily(
-          dimension: 'rem_sleep_min',
-          dayIndex: wakeDayIndex,
-          value: totals.remSleepMinutes!,
-        );
-        pushed = true;
-      }
+      push(DailyMetric.sleepDurationS, totals.totalSleepMinutes * 60.0);
+      push(DailyMetric.sleepDeepMin, totals.deepSleepMinutes);
+      push(DailyMetric.sleepRemMin, totals.remSleepMinutes);
     }
 
-    if (pushed) {
-      // Single recompute per ingest call regardless of how many
-      // dimensions were pushed. Cheap on the longitudinal side
-      // (incremental window recompute) and keeps the next live
-      // tick's `WearableReference` fresh.
-      Synheart.srmTriggerWearableRecompute();
-    }
+    // One refresh per night, as of today: the reference is built from the
+    // dates before today, so today's windows are never judged against
+    // today's own values (the runtime's "no day in its own baseline").
+    if (pushed) Synheart.srmRefreshWearableReference();
   }
 
   /// match a sleep night against a same-day overnight-physiology
@@ -2192,8 +2116,7 @@ class Baselines {
   /// Snapshot the in-memory Recovery + Readiness state as a JSON
   /// string. Hosts persist this (e.g. SharedPreferences) so a fresh
   /// app launch doesn't blank the cards while waiting for tomorrow's
-  /// pull. Mirrors [Synheart.longitudinalSnapshotJson] in shape — the
-  /// host owns the storage layer; the SDK ships dep-free.
+  /// pull. The host owns the storage layer; the SDK ships dep-free.
   ///
   /// Encoded fields:
   /// - `recent_recovery_scores`: last 7 score values (newest at back)

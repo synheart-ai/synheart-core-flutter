@@ -56,6 +56,18 @@ class BehaviorModule extends BaseSynheartModule
   /// guarded on `sessionStartTime > 0`, which only a session sets.
   sb.BehaviorSession? _motionSession;
 
+  /// Told `true` once tracking runs with consent and `false` when it stops
+  /// (including a consent revoke), so the facade can report input capture to
+  /// the runtime. Fires only on change.
+  void Function(bool running)? onInputCaptureChanged;
+  bool _captureRunning = false;
+
+  void _setCaptureRunning(bool running) {
+    if (_captureRunning == running) return;
+    _captureRunning = running;
+    onInputCaptureChanged?.call(running);
+  }
+
   /// Open a session so the accelerometer listener is actually registered.
   ///
   /// Scoped to the motion case on purpose. A session also resets app-switch
@@ -528,12 +540,14 @@ class BehaviorModule extends BaseSynheartModule
       });
 
       SynheartLogger.log('[BehaviorModule] Behavior tracking started');
+      _setCaptureRunning(true);
     } finally {
       _isStarting = false;
     }
   }
 
   Future<void> _stopTracking({required bool disposeSdk}) async {
+    _setCaptureRunning(false);
     await _eventSubscription?.cancel();
     _eventSubscription = null;
 

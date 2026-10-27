@@ -114,7 +114,7 @@ class DiagnosticsScreen extends StatelessWidget {
             title: 'Local data',
             subtitle:
                 'Everything this example stores lives on the device: the '
-                'runtime SQLite store, the SRM snapshot, and consent records.',
+                'runtime SQLite store, the personal baselines, and consent records.',
             children: [
               SizedBox(
                 width: double.infinity,
@@ -138,7 +138,7 @@ class DiagnosticsScreen extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Wipe local data?'),
         content: const Text(
-          'Deletes the runtime SQLite store, the SRM snapshot, and cached '
+          'Deletes the runtime SQLite store, the personal baselines, and cached '
           'consent records for this subject. Baselines restart from cold. '
           'This cannot be undone.',
         ),

@@ -15,29 +15,31 @@ class RuntimeCompat {
   /// release every install hint recommends. Bump it when the bindings adopt a
   /// new symbol or a moved shape, or once they are verified on a newer
   /// release.
-  static const String writtenAgainst = '0.41.0';
+  static const String writtenAgainst = '0.42.1';
 
   /// Oldest runtime the bindings are known to load and behave on. Below this
   /// the SDK refuses to initialise rather than run with entrypoints that no
-  /// longer mean what the code assumes. `0.20.0` is the baseline of the
-  /// runtime's `SDK-CONTRACT-CHANGES.md`.
-  static const String minimum = '0.20.0';
+  /// longer mean what the code assumes. `0.42.0` is the first release on C
+  /// ABI 4.0, which these bindings require.
+  static const String minimum = '0.42.0';
 
   /// The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
   /// any removal, rename or signature change and MINOR on additions only, so a
   /// runtime is compatible when its MAJOR equals [requiredAbiMajor] and its
   /// MINOR is at least [requiredAbiMinor]. This, not the release version, is
   /// the contract; the version checks only grade runtimes that satisfy it.
-  static const String requiredAbi = '1.0';
-  static const int requiredAbiMajor = 1;
+  static const String requiredAbi = '4.0';
+  static const int requiredAbiMajor = 4;
   static const int requiredAbiMinor = 0;
 
-  /// Newest ABI major the bindings also accept. ABI 2.0 only removed symbols
-  /// these bindings never call, and its one addition
-  /// (`synheart_core_last_error_json`) is looked up as optional, so runtimes on
-  /// either major load. Raise it only after checking a new major's removals
-  /// against the bindings.
-  static const int maxAbiMajor = 2;
+  /// Newest ABI major the bindings also accept. Only 4: ABI 4.0 re-signed every
+  /// sample push (each now takes `provider` and `utc_offset_min`) and the
+  /// personal-baseline day calls (calendar dates instead of day indexes). Dart
+  /// FFI does not check a signature, so a binding for the other major would
+  /// still link and then pass the wrong arguments — a native crash, not an
+  /// error. Raise it only after checking a new major's removals and
+  /// re-signings against the bindings.
+  static const int maxAbiMajor = 4;
 
   /// The accepted ABI range, for messages.
   static String get abiRange => maxAbiMajor == requiredAbiMajor

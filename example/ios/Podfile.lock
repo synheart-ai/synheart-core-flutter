@@ -5,19 +5,19 @@ PODS:
   - health (13.2.1):
     - Flutter
   - onnxruntime-c (1.27.0)
-  - synheart_auth (0.1.7):
+  - synheart_auth (0.1.13):
     - Flutter
-    - SynheartAuth
-  - synheart_behavior (0.3.0):
+    - SynheartAuth (>= 0.1.3)
+  - synheart_behavior (0.4.1):
     - Flutter
-  - synheart_core (0.16.1):
+  - synheart_core (0.18.1):
     - Flutter
     - onnxruntime-c (>= 1.20.0)
   - synheart_session (0.3.0):
     - Flutter
   - synheart_wear (0.4.1):
     - Flutter
-  - SynheartAuth (0.1.0)
+  - SynheartAuth (0.1.3)
   - syni (1.0.0):
     - Flutter
 
@@ -30,12 +30,12 @@ DEPENDENCIES:
   - synheart_core (from `.symlinks/plugins/synheart_core/ios`)
   - synheart_session (from `.symlinks/plugins/synheart_session/ios`)
   - synheart_wear (from `.symlinks/plugins/synheart_wear/ios`)
+  - SynheartAuth (from `https://github.com/synheart-ai/synheart-auth-swift.git`, tag `v0.1.3`)
   - syni (from `.symlinks/plugins/syni/ios`)
 
 SPEC REPOS:
   trunk:
     - onnxruntime-c
-    - SynheartAuth
 
 EXTERNAL SOURCES:
   Flutter:
@@ -54,22 +54,30 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/synheart_session/ios"
   synheart_wear:
     :path: ".symlinks/plugins/synheart_wear/ios"
+  SynheartAuth:
+    :git: https://github.com/synheart-ai/synheart-auth-swift.git
+    :tag: v0.1.3
   syni:
     :path: ".symlinks/plugins/syni/ios"
+
+CHECKOUT OPTIONS:
+  SynheartAuth:
+    :git: https://github.com/synheart-ai/synheart-auth-swift.git
+    :tag: v0.1.3
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
   health: e310387222e199d4b3261337490a67aaff6d18eb
   onnxruntime-c: 412ab51682e622e3d77ddc9176aa92517d171820
-  synheart_auth: 2840313dedc10a15e093964c337bebe73666db12
-  synheart_behavior: 7671be37999a5f2824ecb0abc3eb0963666077f2
-  synheart_core: e0242b4b96c58fa21e8ae5591dc88f0a48fc8407
+  synheart_auth: 2df20aa68e9f2c2d0c830e11dc9b37a5f23d9366
+  synheart_behavior: 2fe520d2a19125086ab38aed2968a4c9936da28a
+  synheart_core: ec256b96b22a649c396b72b7964f3c03278bfe8c
   synheart_session: ea763480d9c05d46adc5b6207996c639d21cc3e0
   synheart_wear: 144b9f09a2e83f85c930d0580b89d0738ba34d30
-  SynheartAuth: 1f281c095bd9753fd835ad1d7a2d9ec631e94a76
+  SynheartAuth: 6f545c81723eabc039d5236d2cefea6e692a135a
   syni: c832fd90763dd569c108d949dd9ef376d9e0d6bc
 
-PODFILE CHECKSUM: 100c2be3cf8ab553725020efdb3197c2083c264e
+PODFILE CHECKSUM: 31bc2faa70c2c018bd1bff5d43c0b60b982d9f06
 
 COCOAPODS: 1.16.2

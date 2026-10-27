@@ -564,7 +564,7 @@ class _ContextCard extends StatelessWidget {
   }
 }
 
-/// §7 / §9.5 — the three snapshots and the comparability key.
+/// §7 / §9.5 — the host's snapshot and the comparability key.
 class _SnapshotsCard extends StatelessWidget {
   const _SnapshotsCard();
 
@@ -578,9 +578,9 @@ class _SnapshotsCard extends StatelessWidget {
     return SectionCard(
       title: 'Persisted snapshots',
       subtitle:
-          'Three, not one. The runtime’s own SQLite covers session state '
-          'only; everything the engine accumulates about the person lives in '
-          'snapshots the host exports and re-loads.',
+          'One for the host. The runtime seals the personal baselines to its '
+          'own data directory and restores them at startup; session state is '
+          'the snapshot left to the host.',
       trailing: StatusPill(
         '${host.sessionStateSaves} state saves',
         tone: host.sessionStateSaves > 0 ? PillTone.good : PillTone.neutral,
@@ -593,7 +593,7 @@ class _SnapshotsCard extends StatelessWidget {
           ),
         const Divider(height: 24),
         KeyValueRow('config_id', host.configId ?? 'unavailable'),
-        KeyValueRow('device_class key', c.hostDeviceClass),
+        KeyValueRow('device_class', 'auto (declared by the SDK)'),
         if (host.configIdChanged) ...[
           const SizedBox(height: 8),
           ErrorBanner(
@@ -609,17 +609,13 @@ class _SnapshotsCard extends StatelessWidget {
           'and the context engine, and is loaded at initialize() — before '
           'the first tick, because window 1 writes each head’s state slot and '
           'a later restore is overwritten by a cold window.\n\n'
-          'SRM carries the personal baseline and is exported at session end. '
-          'Without it the baselines report Warming forever across launches, '
-          'however many sessions the person completes. It is keyed per '
-          'device_class: a cross-class load is rejected with '
-          'ERR_SRM_CONFIG_MISMATCH, which is the baseline partition working, '
-          'and one shared file means a phone and a tablet take turns '
-          'invalidating each other.\n\n'
-          'longitudinal carries the wearable reference, the 7-night sleep '
-          'ring and today’s partial daily accumulator, and is written after '
-          'every recompute — without it a mid-day relaunch discards the '
-          'morning’s cardiovascular load.',
+          'The personal baselines (every per-window reference, the daily '
+          'values, the 7-night sleep ring) are one snapshot the runtime seals '
+          'itself, at session end, after every reference refresh and every 15 '
+          'minutes while windows close. One snapshot holds every device '
+          'class. A host that persists elsewhere uses exportBaselineSnapshot '
+          'and loadBaselineSnapshot; this one keeps the runtime’s directory '
+          'and needs neither.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             height: 1.4,
@@ -639,7 +635,7 @@ class _DailyLoopCard extends StatelessWidget {
     final theme = Theme.of(context);
     final c = context.watch<SynheartController>();
     final host = c.host;
-    final supported = host.abiSupport['rollDay'] == true;
+    final supported = host.abiSupport['attachClosedDayStrainJson'] == true;
 
     return SectionCard(
       title: 'Daily loop',
@@ -648,11 +644,12 @@ class _DailyLoopCard extends StatelessWidget {
           'live per-window head. Desktop implements none of this, so there is '
           'no reference to copy.',
       trailing: StatusPill(
-        '${host.dailyPushes} dimensions',
+        '${host.dailyPushes} daily values',
         tone: host.dailyPushes > 0 ? PillTone.good : PillTone.neutral,
       ),
       children: [
-        KeyValueRow('roll_day', supported ? 'bound' : 'absent'),
+        KeyValueRow('closed-day strain', supported ? 'bound' : 'absent'),
+        KeyValueRow('strain days attached', '${host.strainScoresAttached}'),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
@@ -670,15 +667,15 @@ class _DailyLoopCard extends StatelessWidget {
           'no live wearable session. It was bound and never called.\n\n'
           'The values here come from the simulator rather than HealthKit or '
           'Health Connect, because this example holds no health permission — '
-          'a real host reads them from the platform store and sends '
-          'fidelity: 1 for a provider summary. Note what is not sent: no '
-          'dimension is padded to zero. A vendor reporting no deep-sleep '
+          'a real host reads them from the platform store and files each '
+          'night under the local date the person woke on. Note what is not '
+          'sent: no metric is padded to zero. A vendor reporting no deep-sleep '
           'figure means the value is absent, and a measured 0.0 there is a '
           'different claim to every head that reads it.\n\n'
-          'roll_day runs at session start and at LOCAL midnight; skip it and '
-          'the engine adopts a provisional UTC day, which is wrong for most '
-          'of the world. The index must strictly advance, so the last one is '
-          'persisted and checked rather than rolled blindly at each launch.',
+          'The engine closes each local day itself at the first input of the '
+          'next, so there is no day to roll. The closed day’s Strain is '
+          'attached once per date, at session start and just after local '
+          'midnight.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             height: 1.4,

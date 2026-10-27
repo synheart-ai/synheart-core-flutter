@@ -614,7 +614,7 @@ if (removed < 0 && e != null && e.op == 'synheart_core_delete_vendor_events_for_
 
 Sync calls still throw `SyncNativeException`, which is a
 `SynheartNativeException` carrying the same `SynheartNativeError`, so one
-`catch` handles both. `lastNativeError` is null on runtimes older than ABI 2.0.
+`catch` handles both.
 
 ### Checklist before filing a bug
 

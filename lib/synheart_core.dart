@@ -66,6 +66,7 @@ export 'src/baseline/baseline_snapshots.dart';
 export 'src/models/session_handle.dart';
 
 // Customer-facing GDPR Article 17 (right-to-erasure) types.
+export 'src/models/daily_metric.dart';
 export 'src/models/data_deletion.dart';
 
 // Typed state and metrics

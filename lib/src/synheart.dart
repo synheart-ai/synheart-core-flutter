@@ -25,6 +25,7 @@ import 'modules/interfaces/consent_provider.dart';
 import 'modules/wear/wear_module.dart';
 import 'models/accel_placement.dart';
 import 'models/behavior_event_input.dart';
+import 'models/daily_metric.dart';
 import 'models/data_deletion.dart';
 import 'models/task_type.dart';
 import 'models/focus_kind.dart';
@@ -206,6 +207,13 @@ class Synheart {
   /// True when [sdkRegisterDevice] succeeded for this process (core-runtime auth path).
   static bool _deviceAuthViaCoreRuntime = false;
   static bool _sdkCryptoCallbacksAttached = false;
+
+  /// Set when registration last failed with `STORAGE_UNAVAILABLE`: the OS
+  /// credential store did not answer (a Keychain / Keystore locked at boot).
+  /// The next attempt reinstalls the crypto callbacks first, which is what
+  /// restores the stored identity, so a second `device_id` is never minted
+  /// over the first (runtime 0.42.1).
+  static bool _identityStoreWasUnavailable = false;
 
   // Watch session module
   WatchSessionModule? _watchSessionModule;
@@ -1167,6 +1175,90 @@ class Synheart {
     }
   }
 
+  /// Attach the host crypto callbacks to [runtime]. Also what restores a
+  /// stored device identity after the credential store was unavailable.
+  static bool _installSdkCryptoCallbacks(CoreRuntimeBridge runtime) {
+    final table = PlatformNativeSdkCryptoCallbacks.tryCreateRawTable();
+    if (table == null) {
+      SynheartLogger.log(
+        '[Synheart] synheart_native_* crypto symbols not found — '
+        'device auth will fail. Ensure synheart_auth plugin is '
+        'registered and libsynheart_native_crypto.so is bundled.',
+      );
+      return false;
+    }
+    final crc = runtime.setSdkCryptoCallbacks(table);
+    if (crc != 0) {
+      SynheartLogger.log(
+        '[Synheart] synheart_core_sdk_set_crypto_callbacks failed: $crc',
+      );
+      return false;
+    }
+    // Success path is intentionally silent — bootstrap chatter.
+    _sdkCryptoCallbacksAttached = true;
+    return true;
+  }
+
+  /// Register the device, riding out a credential store that does not
+  /// answer yet. `restored` is true when reinstalling the callbacks brought
+  /// back an identity already registered for [subject] (nothing registered);
+  /// otherwise `result` is what registration returned, null included — the
+  /// runtime's own null stays a failure for the caller to report.
+  ///
+  /// `STORAGE_UNAVAILABLE` from registration means the Keychain / Keystore
+  /// did not answer, not that there is no identity (runtime 0.42.1). The
+  /// sequence the runtime asks for: wait for the store, reinstall the crypto
+  /// callbacks (that restores the stored identity), and register only if the
+  /// device is still unregistered. The waits here are short, because this can
+  /// run during start-up; past them the typed, retryable error is rethrown
+  /// and the next trigger (consent, session start) resumes from the
+  /// reinstall.
+  static Future<({bool restored, Map<String, dynamic>? result})>
+  _registerDevice(
+    CoreRuntimeBridge runtime,
+    String clientId,
+    String subject,
+  ) async {
+    const restored = (restored: true, result: null);
+    if (_identityStoreWasUnavailable) {
+      _identityStoreWasUnavailable = false;
+      if (_installSdkCryptoCallbacks(runtime) &&
+          _restoredRegistration(runtime, subject)) {
+        return restored;
+      }
+    }
+    const waits = [Duration(seconds: 1), Duration(seconds: 3)];
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return (
+          restored: false,
+          result: await runtime.sdkRegisterDevice(clientId),
+        );
+      } on SyncNativeException catch (e) {
+        if (e.code != 'STORAGE_UNAVAILABLE') rethrow;
+        if (attempt >= waits.length) {
+          _identityStoreWasUnavailable = true;
+          rethrow;
+        }
+        SynheartLogger.log(
+          '[Synheart] Credential store unavailable during registration; '
+          'retrying after ${waits[attempt].inSeconds}s.',
+        );
+        await Future<void>.delayed(waits[attempt]);
+        if (_installSdkCryptoCallbacks(runtime) &&
+            _restoredRegistration(runtime, subject)) {
+          return restored;
+        }
+      }
+    }
+  }
+
+  static bool _restoredRegistration(CoreRuntimeBridge runtime, String subject) {
+    final snap = runtime.sdkDeviceAuthStatus();
+    return snap?['status']?.toString() == 'registered' &&
+        _deviceAuthStatusMatchesSubject(snap, subject);
+  }
+
   /// Typed variant of [ensureDeviceAuthRegistered]. Native registration
   /// failures (including `DEVICE_ACCOUNT_MISMATCH`) are allowed to propagate
   /// as [SyncNativeException] so a host can route them correctly.
@@ -1438,24 +1530,7 @@ class Synheart {
           // Resolves `synheart_native_*` symbols directly into the runtime's
           // callback table — no Dart trampolines. Fails fast at registration
           // time if symbols are missing.
-          final table = PlatformNativeSdkCryptoCallbacks.tryCreateRawTable();
-          if (table == null) {
-            SynheartLogger.log(
-              '[Synheart] synheart_native_* crypto symbols not found — '
-              'device auth will fail. Ensure synheart_auth plugin is '
-              'registered and libsynheart_native_crypto.so is bundled.',
-            );
-          } else {
-            final crc = _coreRuntime!.setSdkCryptoCallbacks(table);
-            if (crc != 0) {
-              SynheartLogger.log(
-                '[Synheart] synheart_core_sdk_set_crypto_callbacks failed: $crc',
-              );
-            } else {
-              _sdkCryptoCallbacksAttached = true;
-              // Success path is intentionally silent — bootstrap chatter.
-            }
-          }
+          _installSdkCryptoCallbacks(_coreRuntime!);
         }
       }
     } on SynheartRuntimeException {
@@ -1629,6 +1704,12 @@ class Synheart {
             (int tsMs, double ax, double ay, double az) {
               _coreRuntime?.pushAccel(tsMs, ax, ay, az);
             };
+        // Input capture (runtime 0.42+): without these reports a phone never
+        // certifies a window as rest, so resting HR and HRV never learn.
+        if (config?.behaviorConfig?.reportInputCapture ?? true) {
+          _behaviorModule!.onInputCaptureChanged = _onBehaviorCaptureChanged;
+          _attachInputCaptureLifecycle();
+        }
       }
 
       _watchSessionModule = WatchSessionModule();
@@ -2391,6 +2472,13 @@ class Synheart {
   /// Consent- and device-auth-gated runtime-side; returns empty when cloud is
   /// not configured/consented, the range is empty, or the vendored runtime
   /// predates this capability (missing native symbol).
+  ///
+  /// A failed read also returns empty, and since runtime 0.42.1 that includes
+  /// a response that timed out (it used to read as an empty archive). To
+  /// tell "no windows" from "the archive did not answer", check
+  /// [lastNativeError] after an empty result: a failure leaves its structured
+  /// error there (a timeout as `NETWORK`, retryable); a genuinely empty range
+  /// leaves none.
   ///
   /// NOTE: like the upload flush, the underlying FFI call performs the network
   /// round-trip synchronously (native `block_on`). It is exposed as a [Future]
@@ -3247,14 +3335,57 @@ class Synheart {
   /// Returns the score JSON, or `null` when the symbol is absent **or** when
   /// the day has nothing scorable accumulated yet. The second case is normal.
   ///
-  /// **Call this before [rollDay].** Rolling finalises the day and clears the
-  /// values Strain is computed from, so a host that rolls first gets `null`
-  /// every day and never emits a Strain score. `rollDay` does not score for
-  /// you — it validates the index and folds the day into the longitudinal
-  /// baselines, nothing more.
+  /// The engine closes each local day itself at the first input of the next,
+  /// so call this before the person's local midnight, from a running session.
+  /// After midnight, [attachClosedDayStrain] scores the day that just closed.
   ///
   /// Takes no input: the engine accumulated the inputs itself over the day.
   static String? attachStrainScore() => _coreRuntime?.attachStrainScoreJson();
+
+  /// Score the local day the engine closed last and attach it to the next
+  /// HSI frame: `{local_date, start_ms, end_ms, strain}`. Call once a day
+  /// after local midnight, once that day's vendor dailies (steps) are pushed
+  /// with [srmPushWearableDaily]. Null before any day has closed or when the
+  /// closed day has nothing to score.
+  static String? attachClosedDayStrain() =>
+      _coreRuntime?.attachClosedDayStrainJson();
+
+  // ── Level reports and the input envelope (runtime 0.42+) ───────────────
+
+  /// Report whether keyboard and pointer/touch capture is running, from
+  /// [tsMs] (default now) on. A still window counts as rest — and teaches the
+  /// resting heart rate and HRV — only while capture is reported running.
+  ///
+  /// The SDK reports its own in-app capture automatically
+  /// ([BehaviorConfig.reportInputCapture]). Call this yourself only when the
+  /// host captures input outside the app (a system keyboard), with that
+  /// automatic report turned off. A level: it holds across sessions. True
+  /// when accepted.
+  static bool setInputCapture({required bool running, int? tsMs}) =>
+      _coreRuntime?.setInputCapture(
+        running: running,
+        tsMs: tsMs ?? DateTime.now().millisecondsSinceEpoch,
+      ) ??
+      false;
+
+  /// Report whether a call is on, from [tsMs] (default now) on, as the OS
+  /// microphone or camera indicator shows it. A level, like
+  /// [setInputCapture]. Report the current state again after [initialize].
+  static bool setCallActive({required bool active, int? tsMs}) =>
+      _coreRuntime?.setCallActive(
+        active: active,
+        tsMs: tsMs ?? DateTime.now().millisecondsSinceEpoch,
+      ) ??
+      false;
+
+  /// Push a batch of typed inputs in the runtime's input envelope, a JSON
+  /// array of `{at_ms, utc_offset_min, provider, body}`. Returns the batch's
+  /// account (`accepted`, `regressions`, `late`, `invalid`, `not_stored`,
+  /// `malformed`, `not_permitted`). Interaction inputs sent here skip the
+  /// digital-behaviour axes, which read [pushBehaviorEvent]: send each
+  /// interaction one way only.
+  static Map<String, dynamic>? pushInputsJson(String inputsJson) =>
+      _coreRuntime?.pushInputsJson(inputsJson);
 
   /// Push a GPS-derived ground speed sample in **m/s**.
   ///
@@ -3356,13 +3487,6 @@ class Synheart {
       onHsi?.call(hsiJson);
     }
   }
-
-  /// Advance the daily accumulator. [dayIndex] is days since epoch in the
-  /// host's **local** zone and must strictly advance.
-  ///
-  /// Skip it and the engine adopts a provisional UTC day, which is wrong for
-  /// most of the world. Returns `null` when the symbol is absent.
-  static int? rollDay(int dayIndex) => _coreRuntime?.rollDay(dayIndex);
 
   /// Export per-head session state — Capacity, Mental Fatigue, Stress, Valence
   /// and the context engine. Persist once per emitted window and on
@@ -3628,61 +3752,61 @@ class Synheart {
     return _coreRuntime?.personalizationContextJson();
   }
 
-  /// Push a daily wearable summary into the longitudinal SRM. After a
-  /// batch, call [srmTriggerWearableRecompute] so the resulting
-  /// `WearableReference` propagates to the next inference window.
+  /// Write one night's or day's value of a daily [metric] into the personal
+  /// baselines. After a batch, call [srmRefreshWearableReference] so the next
+  /// window reads the new reference.
   ///
-  /// Allowed [dimension] values:
-  /// - `sleep_need` — total sleep in seconds (3h–14h filter)
-  /// - `sleep_regularity` — bedtime-midpoint hours-of-day (0–24)
-  /// - `hrv_rmssd` — daily RMSSD in ms
-  /// - `hrv_sdnn` — daily SDNN in ms (e.g. Apple Health Watch HRV)
-  /// - `resting_hr` — resting HR in bpm
-  /// - `recovery_score` — vendor recovery in `[0, 1]`
-  /// - `deep_sleep_min` / `rem_sleep_min` — minutes per night
-  /// - `daily_strain` — vendor strain normalised to `[0, 1]`
+  /// [metric] is one of [DailyMetric] (the unit is in the name, e.g.
+  /// [DailyMetric.sleepDurationS] in seconds). [provider] names the source
+  /// (`"apple_health"`, `"whoop"`). [date] is read for its calendar fields
+  /// only, as the person's own local date; a night belongs to the date the
+  /// person woke on. [vendorSummary] is true for a provider's daily summary,
+  /// false for a value computed from raw samples. Writing a date again
+  /// replaces it.
   ///
-  /// [dayIndex] is the unix-epoch day (compute via
-  /// [epochDayFor] or `timestamp.millisecondsSinceEpoch ~/ 86400000`).
-  /// [fidelity]: `0 = raw observation`, `1 = vendor summary`. Most
-  /// vendor backfill pushes are `1` with a confidence of 0.80–0.90.
-  static void srmPushWearableDaily({
-    required String dimension,
-    required int dayIndex,
+  /// Returns `0`; `1004` for an unknown metric; `5002` for a value outside
+  /// the metric's plausible bounds or a stream the person has not permitted
+  /// (not stored); `-1` with no running pipeline or no runtime.
+  static int srmPushWearableDaily({
+    required String provider,
+    required String metric,
+    required DateTime date,
     required double value,
-    double confidence = 0.85,
-    int fidelity = 1,
+    bool vendorSummary = true,
   }) {
-    _coreRuntime?.srmPushWearableDaily(
-      dimension: dimension,
-      dayIndex: dayIndex,
-      value: value,
-      confidence: confidence,
-      fidelity: fidelity,
-    );
+    return _coreRuntime?.srmPushWearableDaily(
+          provider: provider,
+          metric: metric,
+          year: date.year,
+          month: date.month,
+          day: date.day,
+          value: value,
+          vendorSummary: vendorSummary,
+        ) ??
+        -1;
   }
 
-  /// Trigger an SRM recompute and propagate the resulting
-  /// `WearableReference` to the state runtime.
-  ///
-  /// Call after a batch of [srmPushWearableDaily] (e.g. at the end of
-  /// vendor backfill) so the next `tick()` window picks up fresh
-  /// personal baselines.
-  ///
-  /// [triggerType]: `0 = Window` (incremental, recommended), `1 =
-  /// AffectedWindow`, `2 = Full` (rebuild everything).
-  /// [asOfDay] defaults to today's epoch-day if `null`.
-  static void srmTriggerWearableRecompute({int triggerType = 0, int? asOfDay}) {
-    final day = asOfDay ?? epochDayFor(DateTime.now());
-    _coreRuntime?.srmTriggerWearableRecompute(
-      triggerType: triggerType,
-      asOfDay: day,
-    );
+  /// Rebuild the wearable reference from the daily values of the local dates
+  /// before [asOf] (default: today, local), and hand it to the state heads.
+  /// Call once a day after [srmPushWearableDaily]. Returns `0`, `1004`,
+  /// `1002` (busy), `-1` (no pipeline), or `null` without the call.
+  static int? srmRefreshWearableReference({DateTime? asOf}) {
+    final d = asOf ?? DateTime.now();
+    return _coreRuntime?.srmRefreshWearableReference(d.year, d.month, d.day);
   }
 
-  /// Convert a `DateTime` to the unix-epoch day index used by
-  /// [srmPushWearableDaily]. Always operates in UTC so the day boundary
-  /// is stable across the user's timezone.
+  /// Declare what kind of day [date] (a local date) is, so the personal
+  /// baselines key behaviour by day type: `0` workday, `1` free day, `2`
+  /// leave, `3` sick, `4` travel, `5` on-call. Sick, leave and travel days
+  /// teach a separate side reference, so an illness or a holiday never
+  /// becomes the person's normal. Returns `0`, `1004`, `-1`, or `null`.
+  static int? srmSetDayType(DateTime date, int dayType) =>
+      _coreRuntime?.srmSetDayType(date.year, date.month, date.day, dayType);
+
+  /// Convert a `DateTime` to its UTC unix-epoch day index.
+  ///
+  /// No runtime call keys on this since runtime 0.42: daily values take the
+  /// person's local date (see [srmPushWearableDaily]).
   static int epochDayFor(DateTime t) =>
       t.toUtc().millisecondsSinceEpoch ~/ 86_400_000;
 
@@ -3738,6 +3862,16 @@ class Synheart {
   static void _ingestSingleEvent(Map<String, dynamic> event) {
     final runtime = _coreRuntime;
     if (runtime == null) return;
+    // The offset in force at the sample, not now: without it the runtime
+    // dates the sample with the device's current offset, which files a
+    // sample from before a daylight-saving change under the wrong local day.
+    final ts = event['ts_ms'];
+    if (ts is int) {
+      event.putIfAbsent(
+        'utc_offset_min',
+        () => CoreRuntimeBridge.utcOffsetMinAt(ts),
+      );
+    }
     final batchJson = jsonEncode([event]);
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final hsi = runtime.ingestBatch(batchJson, nowMs);
@@ -3788,37 +3922,85 @@ class Synheart {
   /// is not linked.
   static String? get runtimeBaselinesJson => _coreRuntime?.baselinesJson();
 
-  /// Export the native runtime SRM snapshot as JSON for cross-session persistence.
-  static String? exportRuntimeSRMSnapshot() {
-    // Symmetric with the load and with [longitudinalSnapshotJson]: a host that
-    // exports before the first session would otherwise get null and persist
-    // nothing, silently.
+  /// Every personal baseline as one opaque base64 snapshot, for a host that
+  /// persists outside the runtime's data directory. Store it as private
+  /// health data; never parse it. The runtime seals the same snapshot to its
+  /// own directory at session end and after every refresh, so a host that
+  /// keeps that directory needs neither this nor [loadBaselineSnapshot].
+  static String? exportBaselineSnapshot() {
+    // Without a pipeline the runtime has no baselines to export and returns
+    // null, which a host would persist as "nothing", silently.
     _coreRuntime?.ensurePipeline();
-    return _coreRuntime?.exportSrmSnapshot();
+    return _coreRuntime?.exportBaselineSnapshot();
   }
 
-  /// Load a native runtime SRM snapshot from JSON.
-  /// Returns true on success, false on failure.
-  static bool loadRuntimeSRMSnapshot(String json) {
-    // Same cold-boot problem [loadLongitudinalSnapshot] documents, and it was
-    // missing here: a host restoring baselines at startup does so before any
-    // session has materialized the Pipeline, so the load failed and the
-    // person re-warmed 30 observations across 3 days that were already on
-    // disk. Symptom is a snapshot that saves cleanly every session end and is
-    // rejected on every launch. `ensurePipeline` is a no-op when one exists.
+  /// Restore a snapshot from [exportBaselineSnapshot]. False when the runtime
+  /// refused it (damaged, from a newer build, or another subject's); the
+  /// baselines are then left as they were. A snapshot from a runtime before
+  /// 0.42 is always refused, and the baselines start cold once.
+  static bool loadBaselineSnapshot(String snapshotB64) {
+    // A host restores at startup, before any session has built the pipeline;
+    // the load needs one. `ensurePipeline` is a no-op when one exists.
     _coreRuntime?.ensurePipeline();
-    return _coreRuntime?.loadSrmSnapshot(json) ?? false;
+    return _coreRuntime?.loadBaselineSnapshot(snapshotB64) ?? false;
   }
+
+  /// Forget part of the personal baselines at the person's request, e.g.
+  /// `{"scope":"everything"}`, `{"scope":"device","device":"mobile"}` or
+  /// `{"scope":"daily_values","from":"2026-10-01","to":"2026-10-07"}`. The
+  /// runtime re-seals what remains; baseline snapshots the host exported
+  /// earlier are the host's to delete. Returns `0`, `1` (bad scope), `1002`
+  /// (busy), `-1` (no pipeline), or `null` without the call.
+  static int? forgetBaselines(String scopeJson) =>
+      _coreRuntime?.srmForgetBaselines(scopeJson);
+
+  /// Personal-baseline events since the last call (`reference_ready`,
+  /// `episode_opened`, `promoted`, …), oldest first, as a JSON array.
+  /// Device-only: they name the person's context cells.
+  static String? drainBaselineEventsJson() =>
+      _coreRuntime?.srmDrainEventsJson();
+
+  /// Whether this host feeds the personal baselines what they need, judged
+  /// at [nowMs] (default now). Act on every requirement whose `status` is
+  /// `unmet`. Meant for a developer screen, not for users.
+  static String? baselineRequirementsJson({int? nowMs}) =>
+      _coreRuntime?.baselineRequirementsJson(
+        nowMs ?? DateTime.now().millisecondsSinceEpoch,
+      );
+
+  /// What the personal baselines know, as JSON. Device-only.
+  static String? baselineProfileJson() => _coreRuntime?.baselineProfileJson();
+
+  /// The person's rhythm of active use, as JSON (the literal `null` before
+  /// any active minute). Device-only.
+  static String? baselineRhythmJson() => _coreRuntime?.baselineRhythmJson();
+
+  /// Which windows taught the personal baselines on the local [date], as a
+  /// JSON array of `{device, windows, digest}` — for checking against the
+  /// host's own log.
+  static String? baselineWindowDigestJson(DateTime date) =>
+      _coreRuntime?.baselineWindowDigestJson(date.year, date.month, date.day);
+
+  /// Register an episode direction (a weighted combination of one family's
+  /// metrics). Directions persist with the baselines; register them at every
+  /// start. Returns the direction's key as JSON, or null when refused.
+  static String? registerBaselineDirection(String directionJson) =>
+      _coreRuntime?.srmRegisterDirection(directionJson);
+
+  /// Start a new rest block at [tsMs] (default now), such as a protocol's
+  /// rest phase. Returns `0`, `1002`, `-1`, or `null` without the call.
+  static int? beginBaselineRestBlock({int? tsMs}) => _coreRuntime
+      ?.baselineBeginRestBlock(tsMs ?? DateTime.now().millisecondsSinceEpoch);
 
   /// Ensure the native engine pipeline exists, creating a default one if
   /// none is live yet.
   ///
   /// The runtime lazily creates its `Pipeline` — before the first session
-  /// (or sleep-score attach) there is no pipeline, so
-  /// [exportRuntimeSRMSnapshot] returns `null` and [loadRuntimeSRMSnapshot]
-  /// fails with "runtime not available". Persistence round-trips on app
-  /// boot run before any of those triggers, so they must materialise the
-  /// pipeline first. No-op when a pipeline already exists.
+  /// (or sleep-score attach) there is no pipeline, so a daily-value push
+  /// returns `-1` and a session-state load fails with "runtime not
+  /// available". Calls made at app boot run before any of those triggers, so
+  /// they must materialise the pipeline first. No-op when a pipeline already
+  /// exists.
   static void ensureRuntimePipeline() {
     _coreRuntime?.ensurePipeline();
   }
@@ -4041,6 +4223,65 @@ class Synheart {
   /// `UsageStatsManager`) does not need this gate — but it costs nothing there,
   /// because a backgrounded host has no windows of its own to type either.
   AppLifecycleListener? _foregroundLifecycleListener;
+
+  // ── Input capture reporting ──────────────────────────────────────────
+  //
+  // The behaviour module's capture is in-app, so it sees input only while the
+  // app is in front. Capture is reported running only while both hold; the
+  // runtime treats a still window as input-free (rest) only then.
+  bool _behaviorCaptureRunning = false;
+  bool _appInForeground = true;
+  bool? _reportedInputCapture;
+  AppLifecycleListener? _inputCaptureLifecycle;
+
+  void _onBehaviorCaptureChanged(bool running) {
+    _behaviorCaptureRunning = running;
+    _syncInputCapture();
+  }
+
+  void _syncInputCapture() {
+    final running = _behaviorCaptureRunning && _appInForeground;
+    if (running == _reportedInputCapture) return;
+    final accepted =
+        _coreRuntime?.setInputCapture(
+          running: running,
+          tsMs: DateTime.now().millisecondsSinceEpoch,
+        ) ??
+        false;
+    if (accepted) _reportedInputCapture = running;
+    SynheartLogger.log(
+      '[Synheart] input capture ${running ? 'running' : 'stopped'} '
+      '(accepted=$accepted)',
+    );
+  }
+
+  void _attachInputCaptureLifecycle() {
+    if (_inputCaptureLifecycle != null) return;
+    try {
+      _inputCaptureLifecycle = AppLifecycleListener(
+        onStateChange: (state) {
+          switch (state) {
+            case AppLifecycleState.resumed:
+              _appInForeground = true;
+            case AppLifecycleState.inactive:
+              // A transient overlay (a call banner, the shade) is not leaving.
+              return;
+            case AppLifecycleState.hidden:
+            case AppLifecycleState.paused:
+            case AppLifecycleState.detached:
+              _appInForeground = false;
+          }
+          _syncInputCapture();
+        },
+      );
+    } on Object catch (e) {
+      // No bound WidgetsBinding (a headless host): there is no foreground to
+      // leave, so capture follows the behaviour module alone.
+      SynheartLogger.log(
+        '[Synheart] input-capture lifecycle gate unavailable ($e).',
+      );
+    }
+  }
 
   /// The foreground-app reporter, for host diagnostics (how many resolves
   /// landed, and which id). `null` when reporting is off or no usable id was
@@ -5109,44 +5350,6 @@ class Synheart {
     return _coreRuntime?.lastSleepScoreJson();
   }
 
-  /// Raw JSON of the longitudinal SRM snapshot (Path-B
-  /// `recent_sleep_score_ring`, dimension buffers, last reference,
-  /// schema version). Useful to surface the ring before any HSI
-  /// window has closed — the ring updates on every
-  /// [attachSleepScore], whereas [wearableReference] only refreshes
-  /// when the live HSI tick produces a window.
-  static String? get longitudinalSnapshotJson {
-    // Symmetric with [loadLongitudinalSnapshot]: callers shouldn't
-    // need to know about Pipeline lifecycle to read an empty-but-valid
-    // snapshot at cold boot. Returns null only when the native runtime
-    // itself is missing.
-    _coreRuntime?.ensurePipeline();
-    return _coreRuntime?.exportLongitudinalSnapshot();
-  }
-
-  /// Restore the longitudinal SRM snapshot exported by
-  /// [longitudinalSnapshotJson] back into the native runtime.
-  ///
-  /// The native runtime does NOT auto-persist this snapshot — its FFI
-  /// contract is "host persists; restores via
-  /// `synheart_core_load_longitudinal_snapshot` on startup". Without
-  /// this call after [initialize], a fresh app launch starts with an
-  /// empty SRM pipeline: the Path-B sleep-score ring, dimension
-  /// buffers and last reference are all gone, so baselines blank back
-  /// to the cold-start "Empty" state on every restart.
-  ///
-  /// Returns `0` on success, a non-zero error code from the runtime,
-  /// or `-1` when the native runtime is not linked.
-  static int loadLongitudinalSnapshot(String json) {
-    // Cold-boot restore happens before any session/sleep-score has
-    // materialized the runtime's Pipeline; without this, the load
-    // would fail with "runtime not available" through no fault of
-    // the caller. ensurePipeline() is documented as no-op when one
-    // already exists, so the warm-path cost is zero.
-    _coreRuntime?.ensurePipeline();
-    return _coreRuntime?.loadLongitudinalSnapshot(json) ?? -1;
-  }
-
   // ── Realtime event stream (RAMEN via native stream-runtime) ──────
 
   /// `true` when the RAMEN stream callback should auto-route vendor.*
@@ -6195,7 +6398,22 @@ class Synheart {
           'skipping re-registration (device_id preview: $idPreview)',
         );
       } else {
-        final reg = await runtime.sdkRegisterDevice(resolvedConfig.subjectId);
+        final outcome = await _registerDevice(
+          runtime,
+          resolvedConfig.subjectId,
+          expectedSubject,
+        );
+        if (outcome.restored) {
+          // Reinstalling the callbacks restored an identity this subject
+          // already holds: nothing to register.
+          _deviceAuthViaCoreRuntime = true;
+          SynheartLogger.log(
+            '[Synheart] Device identity restored once the credential store '
+            'answered — skipping re-registration.',
+          );
+          return;
+        }
+        final reg = outcome.result;
         final deviceId =
             reg?['device_id'] as String? ?? reg?['deviceId'] as String?;
         final err = reg?['error']?.toString();
@@ -6344,6 +6562,11 @@ class Synheart {
     try {
       await _stop();
 
+      _inputCaptureLifecycle?.dispose();
+      _inputCaptureLifecycle = null;
+      // The runtime forgets the level with its handle; report afresh next time.
+      _reportedInputCapture = null;
+      _behaviorCaptureRunning = false;
       _coreRuntime?.dispose();
       _coreRuntime = null;
       _syni = null;

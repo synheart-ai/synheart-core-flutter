@@ -27,19 +27,23 @@ void main() {
       pushed = <_Pushed>[];
     });
 
-    void capture({
-      required String dimension,
-      required int dayIndex,
+    int capture({
+      required String provider,
+      required String metric,
+      required DateTime date,
       required double value,
-      double confidence = 0.85,
-      int fidelity = 1,
-    }) => pushed.add(_Pushed(dimension, dayIndex, value, confidence, fidelity));
+      bool vendorSummary = true,
+    }) {
+      expect(provider, 'apple_health');
+      pushed.add(_Pushed(metric, _dayOf(date), value, vendorSummary));
+      return 0;
+    }
 
     wear.AppleHealthSample hr(int day, double bpm) => wear.AppleHealthSample(
       metric: wear.AppleHealthMetric.heartRate,
       source: 'Apple Watch',
-      startMs: day * 86_400_000 + 12 * 3600_000,
-      endMs: day * 86_400_000 + 12 * 3600_000,
+      startMs: _localMs(day, 12),
+      endMs: _localMs(day, 12),
       value: wear.QuantityValue(bpm),
     );
 
@@ -51,8 +55,8 @@ void main() {
       metric: wear.AppleHealthMetric.sleepStage,
       source: 'Apple Watch',
       // Block ends at 07:00 of the target day.
-      endMs: dayEndOn * 86_400_000 + 7 * 3600_000,
-      startMs: dayEndOn * 86_400_000 + 7 * 3600_000 - durationMin * 60_000,
+      endMs: _localMs(dayEndOn, 7),
+      startMs: _localMs(dayEndOn, 7) - durationMin * 60_000,
       value: wear.SleepStageValue(stage),
     );
 
@@ -69,12 +73,20 @@ void main() {
       agg.add(hr(100, 70));
       agg.add(hr(100, 80));
       agg.replayInto(capture);
-      final restingHr = pushed.where((p) => p.dim == 'resting_hr').toList();
+      final restingHr = pushed
+          .where((p) => p.dim == DailyMetric.restingHrBpm)
+          .toList();
       expect(restingHr, hasLength(1));
       expect(restingHr.first.day, 100);
       expect(restingHr.first.value, closeTo(70.0, 1e-9));
-      expect(restingHr.first.confidence, 0.75); // proxy, lower than vendor
-      expect(restingHr.first.fidelity, 0); // raw observation derived in-app
+      expect(
+        restingHr.first.vendorSummary,
+        isFalse,
+      ); // proxy, lower than vendor
+      expect(
+        restingHr.first.vendorSummary,
+        isFalse,
+      ); // raw observation derived in-app
     });
 
     test('hr filter rejects sub-40 (sensor artefact) and >100 (exercise)', () {
@@ -84,7 +96,9 @@ void main() {
       agg.add(hr(100, 150));
       agg.add(hr(100, 80));
       agg.replayInto(capture);
-      final restingHr = pushed.singleWhere((p) => p.dim == 'resting_hr');
+      final restingHr = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.restingHrBpm,
+      );
       expect(restingHr.value, closeTo(70.0, 1e-9));
     });
 
@@ -95,10 +109,10 @@ void main() {
       agg.add(hr(101, 70));
       agg.replayInto(capture);
       final day100 = pushed.singleWhere(
-        (p) => p.dim == 'resting_hr' && p.day == 100,
+        (p) => p.dim == DailyMetric.restingHrBpm && p.day == 100,
       );
       final day101 = pushed.singleWhere(
-        (p) => p.dim == 'resting_hr' && p.day == 101,
+        (p) => p.dim == DailyMetric.restingHrBpm && p.day == 101,
       );
       expect(day100.value, closeTo(70.0, 1e-9));
       expect(day101.value, closeTo(60.0, 1e-9));
@@ -111,7 +125,9 @@ void main() {
         agg.add(hr(100, 60.0 + (i % 7).toDouble() - 3.0));
       }
       agg.replayInto(capture);
-      final restingHr = pushed.singleWhere((p) => p.dim == 'resting_hr');
+      final restingHr = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.restingHrBpm,
+      );
       // Mean of {-3,-2,-1,0,1,2,3} = 0, so daily mean ≈ 60.
       expect(restingHr.value, closeTo(60.0, 0.01));
     });
@@ -123,15 +139,21 @@ void main() {
       agg.add(sleep(200, wear.SleepStage.rem, 75));
       agg.replayInto(capture);
 
-      final sleepNeed = pushed.singleWhere((p) => p.dim == 'sleep_need');
+      final sleepNeed = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.sleepDurationS,
+      );
       // sleep_need = (60 + 90 + 75) min × 60 s/min = 13_500 s
       expect(sleepNeed.day, 200);
       expect(sleepNeed.value, closeTo(13_500.0, 1e-6));
 
-      final deepMin = pushed.singleWhere((p) => p.dim == 'deep_sleep_min');
+      final deepMin = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.sleepDeepMin,
+      );
       expect(deepMin.value, closeTo(90.0, 1e-6));
 
-      final remMin = pushed.singleWhere((p) => p.dim == 'rem_sleep_min');
+      final remMin = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.sleepRemMin,
+      );
       expect(remMin.value, closeTo(75.0, 1e-6));
     });
 
@@ -141,19 +163,21 @@ void main() {
       final sample = wear.AppleHealthSample(
         metric: wear.AppleHealthMetric.sleepStage,
         source: 'Apple Watch',
-        startMs: 199 * 86_400_000 + 23 * 3600_000 + 30 * 60_000,
-        endMs: 200 * 86_400_000 + 6 * 3600_000 + 30 * 60_000,
+        startMs: _localMs(199, 23, 30),
+        endMs: _localMs(200, 6, 30),
         value: const wear.SleepStageValue(wear.SleepStage.deep),
       );
       agg.add(sample);
       agg.replayInto(capture);
-      final deepMin = pushed.singleWhere((p) => p.dim == 'deep_sleep_min');
+      final deepMin = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.sleepDeepMin,
+      );
       expect(deepMin.day, 200);
       expect(deepMin.value, closeTo(7 * 60.0, 1e-6));
     });
 
     test('sleep with zero duration is ignored', () {
-      final ts = 200 * 86_400_000 + 7 * 3600_000;
+      final ts = _localMs(200, 7);
       agg.add(
         wear.AppleHealthSample(
           metric: wear.AppleHealthMetric.sleepStage,
@@ -171,7 +195,7 @@ void main() {
       agg.add(hr(100, 60));
       agg.replayInto(capture);
       // Only resting_hr should appear.
-      expect(pushed.map((p) => p.dim).toSet(), {'resting_hr'});
+      expect(pushed.map((p) => p.dim).toSet(), {DailyMetric.restingHrBpm});
     });
 
     test('non-mapped metrics are silently ignored', () {
@@ -188,8 +212,8 @@ void main() {
           wear.AppleHealthSample(
             metric: m,
             source: 'Apple Watch',
-            startMs: 100 * 86_400_000,
-            endMs: 100 * 86_400_000,
+            startMs: _localMs(100, 0),
+            endMs: _localMs(100, 0),
             value: const wear.QuantityValue(50.0),
           ),
         );
@@ -204,8 +228,8 @@ void main() {
     wear.AppleHealthSample sdnn(int day, double ms) => wear.AppleHealthSample(
       metric: wear.AppleHealthMetric.hrvSdnn,
       source: 'Apple Watch',
-      startMs: day * 86_400_000 + 12 * 3600_000,
-      endMs: day * 86_400_000 + 12 * 3600_000 + 5 * 60_000,
+      startMs: _localMs(day, 12),
+      endMs: _localMs(day, 12, 5),
       value: wear.QuantityValue(ms),
     );
 
@@ -215,12 +239,14 @@ void main() {
       agg.add(sdnn(100, 50));
       agg.add(sdnn(100, 60));
       agg.replayInto(capture);
-      final hrvSdnn = pushed.where((p) => p.dim == 'hrv_sdnn').toList();
+      final hrvSdnn = pushed
+          .where((p) => p.dim == DailyMetric.overnightSdnnMs)
+          .toList();
       expect(hrvSdnn, hasLength(1));
       expect(hrvSdnn.first.day, 100);
       expect(hrvSdnn.first.value, closeTo(50.0, 1e-9));
-      expect(hrvSdnn.first.confidence, 0.85); // vendor-grade
-      expect(hrvSdnn.first.fidelity, 1); // vendor-derived
+      expect(hrvSdnn.first.vendorSummary, isTrue); // vendor-grade
+      expect(hrvSdnn.first.vendorSummary, isTrue); // vendor-derived
     });
 
     test('sdnn filter rejects sub-5 (sensor error) and >250 (impossible)', () {
@@ -230,16 +256,24 @@ void main() {
       agg.add(sdnn(100, 300));
       agg.add(sdnn(100, 60));
       agg.replayInto(capture);
-      final hrvSdnn = pushed.singleWhere((p) => p.dim == 'hrv_sdnn');
+      final hrvSdnn = pushed.singleWhere(
+        (p) => p.dim == DailyMetric.overnightSdnnMs,
+      );
       expect(hrvSdnn.value, closeTo(50.0, 1e-9));
     });
 
-    test('sdnn does NOT map to hrv_rmssd', () {
+    test('sdnn does NOT map to overnight RMSSD', () {
       // SDNN ≠ RMSSD; we never push SDNN under the rmssd key.
       agg.add(sdnn(100, 50));
       agg.replayInto(capture);
-      expect(pushed.where((p) => p.dim == 'hrv_rmssd'), isEmpty);
-      expect(pushed.where((p) => p.dim == 'hrv_sdnn'), hasLength(1));
+      expect(
+        pushed.where((p) => p.dim == DailyMetric.overnightRmssdMs),
+        isEmpty,
+      );
+      expect(
+        pushed.where((p) => p.dim == DailyMetric.overnightSdnnMs),
+        hasLength(1),
+      );
     });
 
     test('sdnn aggregates per-day independently', () {
@@ -249,10 +283,10 @@ void main() {
       agg.add(sdnn(101, 70));
       agg.replayInto(capture);
       final day100 = pushed.singleWhere(
-        (p) => p.dim == 'hrv_sdnn' && p.day == 100,
+        (p) => p.dim == DailyMetric.overnightSdnnMs && p.day == 100,
       );
       final day101 = pushed.singleWhere(
-        (p) => p.dim == 'hrv_sdnn' && p.day == 101,
+        (p) => p.dim == DailyMetric.overnightSdnnMs && p.day == 101,
       );
       expect(day100.value, closeTo(50.0, 1e-9));
       expect(day101.value, closeTo(50.0, 1e-9));
@@ -271,8 +305,8 @@ void main() {
         wear.AppleHealthSample(
           metric: wear.AppleHealthMetric.restingHeartRate,
           source: 'Apple Watch',
-          startMs: day * 86_400_000 + 4 * 3600_000, // 4am, after sleep
-          endMs: day * 86_400_000 + 4 * 3600_000,
+          startMs: _localMs(day, 4), // 4am, after sleep
+          endMs: _localMs(day, 4),
           value: wear.QuantityValue(bpm),
         );
 
@@ -281,11 +315,11 @@ void main() {
       () {
         agg.add(restingHr(100, 52));
         agg.replayInto(capture);
-        final r = pushed.singleWhere((p) => p.dim == 'resting_hr');
+        final r = pushed.singleWhere((p) => p.dim == DailyMetric.restingHrBpm);
         expect(r.day, 100);
         expect(r.value, closeTo(52.0, 1e-9));
-        expect(r.confidence, 0.85); // vendor-derived
-        expect(r.fidelity, 1); // vendor summary
+        expect(r.vendorSummary, isTrue); // vendor-derived
+        expect(r.vendorSummary, isTrue); // vendor summary
       },
     );
 
@@ -298,10 +332,12 @@ void main() {
       agg.add(hr(100, 80));
       agg.add(restingHr(100, 52));
       agg.replayInto(capture);
-      final restingPushes = pushed.where((p) => p.dim == 'resting_hr').toList();
+      final restingPushes = pushed
+          .where((p) => p.dim == DailyMetric.restingHrBpm)
+          .toList();
       expect(restingPushes, hasLength(1));
       expect(restingPushes.first.value, closeTo(52.0, 1e-9));
-      expect(restingPushes.first.confidence, 0.85);
+      expect(restingPushes.first.vendorSummary, isTrue);
     });
 
     test('proxy fallback fires on days WITHOUT vendor restingHeartRate', () {
@@ -316,17 +352,18 @@ void main() {
       agg.replayInto(capture);
 
       final byDay = {
-        for (final p in pushed.where((p) => p.dim == 'resting_hr')) p.day: p,
+        for (final p in pushed.where((p) => p.dim == DailyMetric.restingHrBpm))
+          p.day: p,
       };
 
       expect(byDay[100]!.value, closeTo(50.0, 1e-9));
-      expect(byDay[100]!.confidence, 0.85); // vendor
+      expect(byDay[100]!.vendorSummary, isTrue); // vendor
 
       expect(byDay[101]!.value, closeTo(70.0, 1e-9));
-      expect(byDay[101]!.confidence, 0.75); // proxy
+      expect(byDay[101]!.vendorSummary, isFalse); // proxy
 
       expect(byDay[102]!.value, closeTo(55.0, 1e-9));
-      expect(byDay[102]!.confidence, 0.85); // vendor wins despite proxy
+      expect(byDay[102]!.vendorSummary, isTrue); // vendor wins despite proxy
     });
 
     test('vendor restingHeartRate filter rejects out-of-band values', () {
@@ -336,7 +373,7 @@ void main() {
       agg.add(restingHr(100, 200));
       agg.add(restingHr(100, 55));
       agg.replayInto(capture);
-      final r = pushed.singleWhere((p) => p.dim == 'resting_hr');
+      final r = pushed.singleWhere((p) => p.dim == DailyMetric.restingHrBpm);
       expect(r.value, closeTo(55.0, 1e-9));
     });
 
@@ -373,18 +410,31 @@ void main() {
         agg.add(hr(d, 62.0 + (d % 5)));
       }
       agg.replayInto(capture);
-      final restingHr = pushed.where((p) => p.dim == 'resting_hr').toList();
+      final restingHr = pushed
+          .where((p) => p.dim == DailyMetric.restingHrBpm)
+          .toList();
       expect(restingHr, hasLength(30));
       expect(restingHr.map((p) => p.day).toSet().length, 30);
     });
   });
 }
 
+/// Epoch ms of [hour]:[minute] local time on the local calendar date [day]
+/// days after 1970-01-01. Built from local fields so a sample keys to [day] in
+/// every time zone, the way the aggregator keys by the person's local date.
+int _localMs(int day, int hour, [int minute = 0]) =>
+    DateTime(1970, 1, 1 + day, hour, minute).millisecondsSinceEpoch;
+
+/// The day number of a local calendar [date], matching [_localMs].
+int _dayOf(DateTime date) =>
+    DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/
+    86_400_000;
+
 class _Pushed {
-  _Pushed(this.dim, this.day, this.value, this.confidence, this.fidelity);
+  _Pushed(this.dim, this.day, this.value, this.vendorSummary);
+
   final String dim;
   final int day;
   final double value;
-  final double confidence;
-  final int fidelity;
+  final bool vendorSummary;
 }
