@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-26
+
+Breaking for two APIs. `Synheart.getSyncStatus()` is removed: use
+`Synheart.syncStatus()`. `ReadinessScoreInput` now takes `recoveryScore` and
+`sleepScore` (plus optional `alignment`, cold-start flags and `baselineDays`)
+in place of the workload, fatigue and history contexts, which are removed.
+Both are detailed below. Runtimes from 0.20.0 to 0.41.x are supported; 0.41.0
+is recommended.
+
 ### Added
 
 - **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
