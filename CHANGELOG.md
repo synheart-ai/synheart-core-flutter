@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at
+load, and runtime 0.42 is refused by every earlier SDK. Install it with
+`synheart install runtime --version 0.42.1`. Expect one cold start on the
+first launch after upgrading: 0.42 cannot read a baseline snapshot from an
+earlier runtime, and refuses an earlier session-state snapshot too (the
+engine logs code `7003` and starts the stateful heads cold). Neither is an
+error to handle.
+
+### Migrating
+
+- **`Synheart.rollDay()` is removed.** The engine closes each local day itself
+  at the first input of the next. Attach Strain before local midnight with
+  `attachStrainScore()`, or after it with the new `attachClosedDayStrain()`.
+- **Baseline snapshots.** `exportRuntimeSRMSnapshot` / `loadRuntimeSRMSnapshot`
+  and `longitudinalSnapshotJson` / `loadLongitudinalSnapshot` are replaced by
+  one opaque pair, `exportBaselineSnapshot()` / `loadBaselineSnapshot()`. The
+  runtime now seals the baselines to its own data directory and restores them
+  at startup, so a host that keeps that directory can drop its snapshot code.
+- **`srmPushWearableDaily`** takes `provider`, a `DailyMetric` name and the
+  local `date` the value belongs to, and returns the runtime's code (`0`,
+  `1004`, `5002`, `-1`). The old dimension names (`hrv_rmssd`, `resting_hr`,
+  `sleep_need`, …) are refused; each `DailyMetric` keeps the old unit.
+  `confidence` and `fidelity` are gone (`vendorSummary` replaces `fidelity`).
+- **`srmTriggerWearableRecompute`** is now `srmRefreshWearableReference({asOf})`:
+  it rebuilds the reference from the dates before `asOf` (default today).
+- **Backfill callbacks.** `PushDailyCallback` takes `provider`, `metric`,
+  `date`, `value` and `vendorSummary`, matching `srmPushWearableDaily`.
+
+### Added
+
+- `DailyMetric`: the twelve daily metric names the runtime accepts.
+- `Synheart.setInputCapture()` and `setCallActive()`, level reports that hold
+  across sessions; `pushInputsJson()` for the runtime's input envelope;
+  `srmSetDayType()`; `forgetBaselines()`; `drainBaselineEventsJson()`,
+  `baselineProfileJson()`, `baselineRhythmJson()`,
+  `baselineWindowDigestJson()` and `baselineRequirementsJson()`;
+  `registerBaselineDirection()` and `beginBaselineRestBlock()`;
+  `attachClosedDayStrain()`. All are optional lookups.
+- `BehaviorConfig.reportInputCapture` (default on). The SDK reports its in-app
+  capture running while it tracks behaviour and the app is in front, so a
+  still window can be certified rest and teach the resting heart rate and HRV.
+  Turn it off when the host captures input elsewhere and reports it itself.
+
+### Changed
+
+- Every sample push carries its provider and the device's UTC offset at the
+  sample's own time, so samples on either side of a daylight-saving change
+  land on the right local day. `pushHr` and the accelerometer pushes accept a
+  `provider`.
+- `device_class` defaults to `"auto"` when the host declares none: an
+  undeclared class now files behaviour baselines under `unknown`. Declaring it
+  no longer resets other baselines; one snapshot holds every class.
+- `input_observable: false` is declared for a host without a behaviour module,
+  whose still windows are input-free.
+- `Baselines` writes its nightly values under the wake date and refreshes the
+  reference once per night.
+
+### Fixed
+
+- The Apple Health backfill filed daily values under the UTC date; it now
+  uses the local date, so a night ending after local midnight east of UTC is
+  no longer filed a day early.
+- Registration that fails with `STORAGE_UNAVAILABLE` (a Keychain / Keystore
+  locked at boot) reinstalls the crypto callbacks and re-reads the identity
+  before trying again, and registers only if the device is still
+  unregistered, so a second `device_id` is never minted over the first.
+
 ### Added
 
 - **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
