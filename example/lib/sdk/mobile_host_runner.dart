@@ -33,13 +33,14 @@ import 'typing_micro_windows.dart';
 ///   events that belong to it, and the window cursor loses them for good.
 /// * **§6.5 — declare rest.** Evaluated once per window against the composite
 ///   definition, one-shot per window.
-/// * **§7 — three snapshots.** Session state once per emitted window and on
-///   background; SRM at session end; longitudinal after every wearable
-///   recompute. Session state is loaded *before the first tick*, because
-///   window 1 writes each head's state slot and a later restore is overwritten
-///   by a cold window.
-/// * **§8 — the daily loop.** `roll_day` at session start and at local
-///   midnight, wearable dailies into the SRM, recompute, persist.
+/// * **§7 — session state.** Exported once per emitted window and on
+///   background, and loaded *before the first tick*, because window 1 writes
+///   each head's state slot and a later restore is overwritten by a cold
+///   window. The personal baselines need nothing: the runtime (0.42+) seals
+///   them to its own data directory and restores them at startup.
+/// * **§8 — the daily loop.** The engine closes each local day itself; the
+///   host attaches the closed day's Strain once per date, and pushes wearable
+///   dailies under their local date followed by one reference refresh.
 ///
 /// It also owns the simulated cardiac stream, which is the only signal source
 /// available on a bare phone with no strap and no health permissions.
@@ -238,7 +239,6 @@ class MobileHostRunner {
   StreamSubscription<BehaviorEvent>? _behaviorSub;
 
   HostSnapshotStore? _store;
-  String _deviceClassKey = 'phone';
 
   final RestWindowDetector rest = RestWindowDetector();
   final TypingMicroWindowAggregator typing = TypingMicroWindowAggregator();
@@ -291,41 +291,17 @@ class MobileHostRunner {
   /// each head's state slot — a later restore is silently overwritten by a
   /// cold window, and by then the context baseline has counted one window
   /// against the wrong history.
-  Future<void> restore({
-    required String subjectId,
-    required String deviceClass,
-  }) async {
-    _deviceClassKey = deviceClass;
+  Future<void> restore({required String subjectId}) async {
     final store = await HostSnapshotStore.open(subjectId: subjectId);
     _store = store;
 
     // Read the live comparability key first, so a mismatch is known before
-    // anything cached under the old one is trusted.
-    configId = Synheart.configId();
-    final storedConfigId = store.readConfigId();
-    configIdChanged =
-        configId != null &&
-        storedConfigId != null &&
-        storedConfigId != configId;
-    if (configId != null) await store.writeConfigId(configId!);
-
-    // SRM and longitudinal first: both call `ensurePipeline` internally, and
-    // a cold-boot host has no Pipeline until something materialises one.
-    final srm = store.readSrm(deviceClass);
-    if (srm != null) {
-      // A rejection here is `ERR_SRM_CONFIG_MISMATCH` — the baseline
-      // partition working, not a bug. Nothing to handle beyond noting it; the
-      // engine starts cold.
-      final ok = Synheart.loadRuntimeSRMSnapshot(srm);
-      if (!ok) {
-        lastError =
-            'SRM snapshot rejected (config mismatch). Baselines start cold — '
-            'expected after changing device_class or the sensing declaration.';
-      }
-    }
-
-    final longitudinal = store.readLongitudinal();
-    if (longitudinal != null) Synheart.loadLongitudinalSnapshot(longitudinal);
+    // anything cached under the old one is trusted. Usually there is no
+    // engine pipeline yet at this point, and the runtime reports no
+    // `config_id` without one — `start()` reads it again once the session
+    // has built it.
+    _configIdChecked = false;
+    await _checkConfigId();
 
     final sessionState = store.readSessionState();
     if (sessionState != null) {
@@ -339,6 +315,26 @@ class MobileHostRunner {
       }
     }
 
+    onChanged();
+  }
+
+  bool _configIdChecked = false;
+
+  /// Compare the live `config_id` with the stored one, once per launch.
+  ///
+  /// The runtime reports `config_id` only while an engine pipeline exists, so
+  /// this is a no-op until one does. Once per launch, because the stored key
+  /// is overwritten with the live one here: a second comparison would always
+  /// match and clear [configIdChanged].
+  Future<void> _checkConfigId() async {
+    if (_configIdChecked) return;
+    final live = Synheart.configId();
+    if (live == null) return;
+    _configIdChecked = true;
+    configId = live;
+    final stored = _store?.readConfigId();
+    configIdChanged = stored != null && stored != live;
+    await _store?.writeConfigId(live);
     onChanged();
   }
 
@@ -378,11 +374,14 @@ class MobileHostRunner {
     // the withholding attributable rather than merely absent.
     setAccelPlacement(placement);
 
-    // §8.1 — roll the day at session start, in the host's LOCAL zone. Skip it
-    // and the engine adopts a provisional UTC day, which is wrong for most of
-    // the world.
-    _rollDayIfNeeded();
-    _scheduleMidnightRoll();
+    // The session has built the engine pipeline, so `config_id` is readable
+    // now if it was not at restore.
+    unawaited(_checkConfigId());
+
+    // §8 — attach the Strain of the day the engine closed last, once per
+    // date, and again shortly after the next local midnight.
+    _attachClosedDayStrainIfNeeded();
+    _scheduleAfterMidnight();
 
     // Interaction feeds the rest detector's quiet clock.
     _behaviorSub ??= Synheart.behaviorEventStream.listen((event) {
@@ -435,7 +434,7 @@ class MobileHostRunner {
     final now = DateTime.now().millisecondsSinceEpoch;
     _countDrained(Synheart.flushPending(now));
 
-    await _persistAll(sessionEnd: true);
+    await _persistAll();
     onChanged();
   }
 
@@ -446,7 +445,7 @@ class MobileHostRunner {
     if (!isRunning) return;
     _flushTypingWindow(force: true);
     _countDrained(Synheart.flushPending(DateTime.now().millisecondsSinceEpoch));
-    await _persistAll(sessionEnd: false);
+    await _persistAll();
     onChanged();
   }
 
@@ -810,84 +809,65 @@ class MobileHostRunner {
 
   // ── The daily loop (§8) ───────────────────────────────────────────────
 
-  /// `roll_day` for today, if today has not been rolled yet.
+  /// Attach the Strain of the local day the engine closed last, once per date.
   ///
-  /// The index must **strictly advance** — a repeat or a negative returns
-  /// `ERR_DAILY_DAY_NOT_ADVANCING` — so the last one is persisted and checked
-  /// rather than rolled blindly at every launch.
-  void _rollDayIfNeeded() {
+  /// The engine closes each local day itself at the first input of the next
+  /// (runtime 0.42 removed `roll_day`) and keeps that closed day until the
+  /// next one closes, across a restart too. So this runs at session start and
+  /// shortly after local midnight, and the runtime's own `local_date` is the
+  /// cursor: the same day is never attached twice.
+  ///
+  /// A null is normal before any day has closed, or when the closed day had
+  /// nothing scorable (no heart-rate load, no workout).
+  void _attachClosedDayStrainIfNeeded() {
+    final json = Synheart.attachClosedDayStrain();
+    if (json == null) return;
+    String? date;
+    try {
+      date =
+          (jsonDecode(json) as Map<String, dynamic>)['local_date'] as String?;
+    } catch (_) {}
+    if (date == null) return;
     final store = _store;
-    // Days since epoch in the host's LOCAL zone, which is the whole point of
-    // the call: the engine's provisional fallback is UTC.
-    final local = DateTime.now();
-    final localMidnight = DateTime(local.year, local.month, local.day);
-    final dayIndex = localMidnight.millisecondsSinceEpoch ~/ 86_400_000;
-
-    final last = store?.readLastDayIndex();
-    if (last != null && dayIndex <= last) return;
-
-    // §8.4 — score BEFORE rolling. `roll_day` does not do this for you: it
-    // validates the index and folds the day into the longitudinal baselines,
-    // and that fold *clears the very values Strain is computed from*. A host
-    // that rolls first gets null from the attach every single day and never
-    // emits a Strain score at all, while the load itself still reaches the
-    // baselines — so nothing looks broken except a score that is always
-    // absent.
-    //
-    // A null here on the first roll of a fresh install is normal: nothing has
-    // been accumulated yet, so there is no component to score.
-    final strain = Synheart.attachStrainScore();
-    if (strain != null) strainScoresAttached++;
-
-    final status = Synheart.rollDay(dayIndex);
-    if (status == null) {
-      lastError =
-          'roll_day is absent from this runtime; the daily accumulator runs '
-          'on a provisional UTC day.';
-      return;
-    }
-    store?.writeLastDayIndex(dayIndex);
+    if (store?.readLastStrainDate() == date) return;
+    store?.writeLastStrainDate(date);
+    strainScoresAttached++;
   }
 
-  /// Re-roll at the next local midnight.
+  /// Run the closed-day attach a few minutes after the next local midnight.
   ///
-  /// A timer only covers the case where the app is alive across midnight.
-  /// A real host needs a scheduled job — `workmanager` on Android,
-  /// `BGTaskScheduler` on iOS — and this example deliberately does not pull
-  /// those plugins in, so a phone that was asleep at midnight rolls the day at
-  /// the next session start instead. That is the gap §8 names as unbuilt.
-  void _scheduleMidnightRoll() {
+  /// The engine closes the day at the first input after midnight, so the
+  /// attach waits a little past it. A timer only covers an app alive across
+  /// midnight; a real host needs a scheduled job (`workmanager` on Android,
+  /// `BGTaskScheduler` on iOS), and this example deliberately does not pull
+  /// those in, so a phone asleep at midnight attaches at the next session
+  /// start instead.
+  void _scheduleAfterMidnight() {
     _midnightTimer?.cancel();
     final now = DateTime.now();
-    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
-    _midnightTimer = Timer(nextMidnight.difference(now), () {
-      _rollDayIfNeeded();
-      _scheduleMidnightRoll();
+    final next = DateTime(now.year, now.month, now.day + 1, 0, 5);
+    _midnightTimer = Timer(next.difference(now), () {
+      _attachClosedDayStrainIfNeeded();
+      _scheduleAfterMidnight();
       onChanged();
     });
   }
 
-  /// Push one day of vendor wearable summaries into the SRM, recompute, and
-  /// persist the longitudinal snapshot.
+  /// Push today's vendor wearable summaries into the personal baselines, then
+  /// refresh the wearable reference.
   ///
   /// This is the **only** baseline path for a phone with no live wearable
-  /// session, and nothing in the stack was calling it. The values here come
-  /// from the simulator rather than HealthKit / Health Connect, because this
-  /// example holds no health permission — a real host reads them from the
-  /// platform store and sends `fidelity: 1` for a provider summary.
+  /// session. The values come from the simulator rather than HealthKit /
+  /// Health Connect, because this example holds no health permission; a real
+  /// host reads them from the platform store and files each night under the
+  /// local date the person woke on.
   ///
-  /// Note what is *not* sent: no dimension is padded to zero. A vendor that
+  /// Note what is *not* sent: no metric is padded to zero. A vendor that
   /// reports no deep-sleep figure means the value is absent, and a measured
   /// `0.0` there is a different claim to every head that reads it.
   Future<void> pushSimulatedDailyBaselines() async {
     final source = _cardiac;
-    // Note this is the UTC epoch day, NOT the local index `roll_day` takes.
-    // The two are deliberately different: `epochDayFor` is UTC so a
-    // wearable's daily rollups keep a stable day boundary as the person
-    // travels, whereas `roll_day` is local because the daily accumulator is
-    // tracking the person's day. Using one for the other misfiles a day's
-    // baselines by up to a day in either direction.
-    final dayIndex = Synheart.epochDayFor(DateTime.now());
+    final today = DateTime.now();
 
     // Resting HR from the simulator's own resting rate, and RMSSD from its
     // trailing window — so the dailies agree with the beats that were streamed
@@ -895,35 +875,27 @@ class MobileHostRunner {
     final restingHr = source == null ? 58.0 : source.restingBpm;
     final rmssd = source?.rmssdMs;
 
-    Synheart.srmPushWearableDaily(
-      dimension: 'resting_hr',
-      dayIndex: dayIndex,
-      value: restingHr,
-      confidence: 0.85,
-      fidelity: 1,
-    );
-    dailyPushes++;
-
-    if (rmssd != null) {
-      Synheart.srmPushWearableDaily(
-        dimension: 'hrv_rmssd',
-        dayIndex: dayIndex,
-        value: rmssd,
-        confidence: 0.85,
-        fidelity: 1,
+    void push(String metric, double value) {
+      final rc = Synheart.srmPushWearableDaily(
+        provider: _simProvider,
+        metric: metric,
+        date: today,
+        value: value,
       );
-      dailyPushes++;
+      if (rc == 0) {
+        dailyPushes++;
+      } else {
+        lastError = 'srm_push_wearable_daily($metric) returned $rc';
+      }
     }
 
-    // Incremental recompute, then propagate the resulting WearableReference so
-    // the next window picks up fresh baselines.
-    Synheart.srmTriggerWearableRecompute(triggerType: 0, asOfDay: dayIndex);
+    push(DailyMetric.restingHrBpm, restingHr);
+    if (rmssd != null) push(DailyMetric.overnightRmssdMs, rmssd);
 
-    // §7 — persist the longitudinal snapshot after every recompute. It is what
-    // carries today's partial daily accumulator, so skipping it discards the
-    // morning's cardiovascular load on a mid-day relaunch.
-    final longitudinal = Synheart.longitudinalSnapshotJson;
-    if (longitudinal != null) await _store?.writeLongitudinal(longitudinal);
+    // One refresh after the batch. The reference is built from the dates
+    // before today, so today's windows are never judged against today's own
+    // values; what was pushed here counts from tomorrow on.
+    Synheart.srmRefreshWearableReference();
 
     onChanged();
   }
@@ -941,25 +913,17 @@ class MobileHostRunner {
     sessionStateSaves++;
   }
 
-  Future<void> _persistAll({required bool sessionEnd}) async {
+  Future<void> _persistAll() async {
     final store = _store;
     if (store == null) return;
+    // The personal baselines are the runtime's to seal (0.42+); session
+    // state is the one snapshot left to the host.
     await persistSessionState();
-
-    final longitudinal = Synheart.longitudinalSnapshotJson;
-    if (longitudinal != null) await store.writeLongitudinal(longitudinal);
-
-    if (sessionEnd) {
-      // SRM at session end. Without it the baselines report `Warming` forever
-      // across launches, however many sessions the person completes.
-      final srm = Synheart.exportRuntimeSRMSnapshot();
-      if (srm != null) await store.writeSrm(_deviceClassKey, srm);
-    }
   }
 
   /// Sizes of what is on disk, for the UI.
   Map<String, int> get storedSnapshotSizes =>
-      _store?.storedSizes(_deviceClassKey) ?? const <String, int>{};
+      _store?.storedSizes() ?? const <String, int>{};
 
   /// Forget every persisted snapshot for this subject.
   Future<void> clearSnapshots() async {

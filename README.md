@@ -106,7 +106,7 @@ Or declare the current package line explicitly:
 
 ```yaml
 dependencies:
-  synheart_core: ^0.19.0
+  synheart_core: ^0.20.0
 ```
 
 Then install the native runtimes. The package alone loads no runtime and
@@ -123,7 +123,8 @@ synheart install runtime
 synheart install syni     # required on iOS, see below
 ```
 
-`synheart_core` requires runtime ABI 1.x (`RuntimeCompat.requiredAbi`). The
+`synheart_core` requires runtime ABI 4.x, which is runtime 0.42.0 or newer
+(`RuntimeCompat.requiredAbi`); older runtimes are refused at load. The
 requirement is also published in the package as `synheart_runtime.json`, which
 the CLI reads to validate a project. If the runtime is missing or does not fit,
 the SDK reports a `SynheartRuntimeException`; see
@@ -1030,6 +1031,25 @@ The package exposes:
 
 These are advanced, source-specific APIs. Consult their exported Dartdoc and
 the example application before integrating them.
+
+#### Personal baselines on runtime 0.42+
+
+- **The runtime persists them.** It seals every personal baseline to its own
+  data directory and restores it at startup, so a host that keeps that
+  directory needs no snapshot calls. `Synheart.exportBaselineSnapshot()` /
+  `loadBaselineSnapshot()` are for a host that persists elsewhere; the text is
+  opaque base64, to be stored as private health data.
+- **Daily values carry a date and a source.** Push them with
+  `Synheart.srmPushWearableDaily(provider:, metric:, date:, value:)`, using a
+  `DailyMetric` name (the unit is in the name) and the local date the person
+  woke on. Call `srmRefreshWearableReference()` once after a batch.
+- **The engine closes days itself.** There is no `rollDay`. Attach Strain
+  before local midnight with `attachStrainScore()`, or after it with
+  `attachClosedDayStrain()`.
+- **Rest needs known input.** A still window teaches the resting heart rate
+  and HRV only when its input is known: the SDK reports its in-app capture
+  automatically, and a host that captures input elsewhere (a system keyboard)
+  reports it with `Synheart.setInputCapture()`.
 
 ### Edge ingest: watch to phone
 

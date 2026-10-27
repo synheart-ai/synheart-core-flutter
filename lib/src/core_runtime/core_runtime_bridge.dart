@@ -1018,7 +1018,33 @@ class CoreRuntimeBridge {
   void pushRr(int tsMs, double rrMs, {String provider = 'default_sensor'}) {
     final cstr = provider.toNativeUtf8();
     try {
-      _ffi.pushRr(_handle, tsMs, rrMs, cstr);
+      _ffi.pushRr(_handle, tsMs, rrMs, cstr, utcOffsetMinAt(tsMs));
+    } finally {
+      malloc.free(cstr);
+    }
+  }
+
+  /// The device's offset from UTC, in minutes, in force at [tsMs] (epoch ms).
+  ///
+  /// Every sample push carries it (C ABI 4.0): the personal baselines file a
+  /// sample under the local day this offset gives. It is taken at the
+  /// sample's own time, not now, so samples on either side of a daylight-saving
+  /// change land on the right local day. Clamped to the runtime's ±840, which
+  /// every real zone satisfies; the runtime drops a sample beyond it.
+  static int utcOffsetMinAt(int tsMs) {
+    final m = DateTime.fromMillisecondsSinceEpoch(
+      tsMs,
+    ).timeZoneOffset.inMinutes;
+    return m < -840 ? -840 : (m > 840 ? 840 : m);
+  }
+
+  /// Run [body] with [provider] as a native string, freed afterwards. A null
+  /// provider passes NULL, which the runtime reads as `"default_sensor"`.
+  static T _withProvider<T>(String? provider, T Function(Pointer<Utf8>) body) {
+    if (provider == null) return body(nullptr);
+    final cstr = provider.toNativeUtf8();
+    try {
+      return body(cstr);
     } finally {
       malloc.free(cstr);
     }
@@ -1047,14 +1073,25 @@ class CoreRuntimeBridge {
       for (var i = 0; i < rrMs.length; i++) {
         rrPtr[i] = rrMs[i];
       }
-      _ffi.pushRrBatch(_handle, anchorTsMs, rrPtr, rrMs.length, order, cstr);
+      _ffi.pushRrBatch(
+        _handle,
+        anchorTsMs,
+        rrPtr,
+        rrMs.length,
+        order,
+        cstr,
+        utcOffsetMinAt(anchorTsMs),
+      );
     } finally {
       malloc.free(rrPtr);
       malloc.free(cstr);
     }
   }
 
-  void pushHr(int tsMs, double bpm) => _ffi.pushHr(_handle, tsMs, bpm);
+  void pushHr(int tsMs, double bpm, {String? provider}) => _withProvider(
+    provider,
+    (p) => _ffi.pushHr(_handle, tsMs, bpm, p, utcOffsetMinAt(tsMs)),
+  );
 
   // ── Breathing compliance ────────────────────────────────────────────
   // Tier-1 RR pushed via [pushRr] is auto-forwarded to the breathing
@@ -1094,30 +1131,57 @@ class CoreRuntimeBridge {
   /// The runtime takes acceleration in g; the public API takes m/s².
   static const double _standardGravity = 9.80665;
 
-  void pushAccel(int tsMs, double x, double y, double z) => _ffi.pushAccel(
-    _handle,
-    tsMs,
-    x / _standardGravity,
-    y / _standardGravity,
-    z / _standardGravity,
+  void pushAccel(int tsMs, double x, double y, double z, {String? provider}) =>
+      _withProvider(
+        provider,
+        (p) => _ffi.pushAccel(
+          _handle,
+          tsMs,
+          x / _standardGravity,
+          y / _standardGravity,
+          z / _standardGravity,
+          p,
+          utcOffsetMinAt(tsMs),
+        ),
+      );
+  void pushWristAccel(
+    int tsMs,
+    double x,
+    double y,
+    double z, {
+    String? provider,
+  }) => _withProvider(
+    provider,
+    (p) => _ffi.pushWristAccel(
+      _handle,
+      tsMs,
+      x / _standardGravity,
+      y / _standardGravity,
+      z / _standardGravity,
+      p,
+      utcOffsetMinAt(tsMs),
+    ),
   );
-  void pushWristAccel(int tsMs, double x, double y, double z) =>
-      _ffi.pushWristAccel(
-        _handle,
-        tsMs,
-        x / _standardGravity,
-        y / _standardGravity,
-        z / _standardGravity,
-      );
-  void pushWornAccel(int tsMs, double x, double y, double z, int placement) =>
-      _ffi.pushWornAccel(
-        _handle,
-        tsMs,
-        x / _standardGravity,
-        y / _standardGravity,
-        z / _standardGravity,
-        placement,
-      );
+  void pushWornAccel(
+    int tsMs,
+    double x,
+    double y,
+    double z,
+    int placement, {
+    String? provider,
+  }) => _withProvider(
+    provider,
+    (p) => _ffi.pushWornAccel(
+      _handle,
+      tsMs,
+      x / _standardGravity,
+      y / _standardGravity,
+      z / _standardGravity,
+      placement,
+      p,
+      utcOffsetMinAt(tsMs),
+    ),
+  );
   void pushBehavior(int tsMs, int eventType, double value) =>
       _ffi.pushBehavior(_handle, tsMs, eventType, value);
 
@@ -1126,9 +1190,9 @@ class CoreRuntimeBridge {
   // Each of these degrades to a no-op when the vendored runtime predates the
   // symbol (see the optional lookups in `ffi_bindings.dart`). The return
   // values distinguish the two cases where it matters: `pushBehaviorEventJson`
-  // and `rollDay` return `null` for "not available in this runtime" and an int
-  // status otherwise, so a caller can tell an unavailable ABI from a rejected
-  // event.
+  // and `srmRefreshWearableReference` return `null` for "not available in this
+  // runtime" and an int status otherwise, so a caller can tell an unavailable
+  // ABI from a rejected call.
 
   /// Whether the loaded runtime can take rich behavior events at all.
   ///
@@ -1159,12 +1223,19 @@ class CoreRuntimeBridge {
     'declareRestWindow': _ffi.declareRestWindow != null,
     'tickAll': _ffi.tickAll != null,
     'flushPending': _ffi.flushPending != null,
-    'rollDay': _ffi.rollDay != null,
     'exportSessionState': _ffi.exportSessionState != null,
     'loadSessionState': _ffi.loadSessionState != null,
     'configId': _ffi.configId != null,
     'lastHsv': _ffi.lastHsv != null,
     'attachStrainScoreJson': _ffi.attachStrainScoreJson != null,
+    'attachClosedDayStrainJson': _ffi.attachClosedDayStrainJson != null,
+    'setInputCapture': _ffi.setInputCapture != null,
+    'setCallActive': _ffi.setCallActive != null,
+    'pushInputsJson': _ffi.pushInputsJson != null,
+    'srmRefreshWearableReference': _ffi.srmRefreshWearableReference != null,
+    'srmSetDayType': _ffi.srmSetDayType != null,
+    'exportBaselineSnapshot': _ffi.exportBaselineSnapshot != null,
+    'loadBaselineSnapshot': _ffi.loadBaselineSnapshot != null,
     'attachRecoveryScoreJson': _ffi.attachRecoveryScoreJson != null,
     'attachReadinessScoreJson': _ffi.attachReadinessScoreJson != null,
   };
@@ -1264,32 +1335,16 @@ class CoreRuntimeBridge {
     return _readAndFree(fn(_handle, nowMs));
   }
 
-  /// Advance the daily accumulator to [dayIndex] (days since epoch in the
-  /// host's **local** zone).
-  ///
-  /// Skip it and the engine adopts a provisional UTC day, which is wrong for
-  /// most of the world. The index must strictly advance — a repeat or a
-  /// negative returns `ERR_DAILY_DAY_NOT_ADVANCING`. Returns `null` when the
-  /// symbol is absent.
-  int? rollDay(int dayIndex) {
-    final rc = _ffi.rollDay?.call(_handle, dayIndex);
-    return _checked(rc, failed: rc != null && rc != 0);
-  }
-
-  /// Export the per-head session state: Capacity, Mental Fatigue, Stress,
-  /// Valence and the context engine.
-  ///
-  /// Persist once per emitted window and on background/terminate.
   /// Score today's accumulated Strain and queue it onto the next HSI frame.
   ///
   /// Returns the score JSON, `null` when the symbol is absent, and also `null`
   /// when the day has no scorable component yet — nothing was accumulated, so
   /// there is nothing to attach. That second case is normal, not an error.
   ///
-  /// **Call this BEFORE `rollDay`.** Rolling finalises the day and clears the
-  /// very values the Strain computation reads, so a host that rolls first gets
-  /// `null` here every single day and never emits a Strain score at all.
-  /// `rollDay` does not do this for you.
+  /// The engine closes each local day itself at the first input of the next
+  /// (C ABI 4.0), so this must run before the person's local midnight, from a
+  /// running session. After midnight use [attachClosedDayStrainJson], which
+  /// scores the day that just closed.
   ///
   /// Takes no input: the engine accumulated Strain's inputs itself over the
   /// day (heart-rate load, workout events), and asking the host to supply them
@@ -1297,6 +1352,17 @@ class CoreRuntimeBridge {
   /// holds.
   String? attachStrainScoreJson() {
     final fn = _ffi.attachStrainScoreJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
+  }
+
+  /// Score the local day the engine closed last and queue it onto the next
+  /// frame: `{local_date, start_ms, end_ms, strain}`. Call once a day after
+  /// local midnight, once that day's vendor dailies (steps, active minutes)
+  /// are pushed. Null before any day has closed, when the closed day has
+  /// nothing to score, or when the call is absent.
+  String? attachClosedDayStrainJson() {
+    final fn = _ffi.attachClosedDayStrainJson;
     if (fn == null) return null;
     return _readOrNote(fn(_handle));
   }
@@ -1392,38 +1458,84 @@ class CoreRuntimeBridge {
   String? personalizationContextJson() =>
       _readOrNote(_ffi.personalizationContextJson(_handle));
 
-  /// Push a longitudinal SRM daily value. Allowed dimensions:
-  /// `sleep_need`, `sleep_regularity`, `hrv_rmssd`, `resting_hr`,
-  /// `recovery_score`, `deep_sleep_min`, `rem_sleep_min`. Day-index =
-  /// epoch-day (`epoch_ms / 86_400_000`). Fidelity: `0`=raw, `1`=summary.
-  void srmPushWearableDaily({
-    required String dimension,
-    required int dayIndex,
+  /// Write one local date's value of a daily [metric] into the personal
+  /// baselines, from [provider] (`"apple_health"`, `"whoop"`, …).
+  ///
+  /// [metric] is one of the runtime's names: `sleep.duration_s`,
+  /// `sleep.midpoint_h`, `cardiac.overnight_rmssd_ms`,
+  /// `cardiac.overnight_sdnn_ms`, `cardiac.resting_hr_bpm`,
+  /// `vendor.recovery_frac`, `sleep.deep_min`, `sleep.rem_min`,
+  /// `vendor.strain_frac`, `motion.steps_count`, `cardiac.hrr_load_au`,
+  /// `cardiac.overnight_hr_sd_bpm` (the unit is in the name). The date is the
+  /// calendar date in the person's time zone; a night belongs to the date the
+  /// person woke on. [vendorSummary] is true for a provider's daily summary,
+  /// false for a value computed from raw samples. Writing a date again
+  /// replaces it.
+  ///
+  /// Returns `0`; `1004` for an unknown metric or a date that does not exist;
+  /// `5002` for a value outside the metric's plausible bounds or a stream the
+  /// person has not permitted (not stored); `-1` with no running pipeline.
+  int srmPushWearableDaily({
+    required String provider,
+    required String metric,
+    required int year,
+    required int month,
+    required int day,
     required double value,
-    double confidence = 0.85,
-    int fidelity = 1,
+    bool vendorSummary = true,
   }) {
-    _withCString(
-      dimension,
-      (p) => _ffi.srmPushWearableDaily(
-        _handle,
-        p,
-        dayIndex,
-        value,
-        confidence,
-        fidelity,
+    final rc = _withProvider(
+      provider,
+      (pp) => _withCString(
+        metric,
+        (mp) => _ffi.srmPushWearableDaily(
+          _handle,
+          pp,
+          mp,
+          year,
+          month,
+          day,
+          value,
+          vendorSummary ? 1 : 0,
+        ),
       ),
     );
+    return _checked(rc, failed: rc != 0);
   }
 
-  /// Trigger a longitudinal SRM recompute. Call after a batch of
-  /// [srmPushWearableDaily] so the next inference window picks up
-  /// fresh personal baselines. `triggerType`: `0=Window, 1=AffectedWindow,
-  /// 2=Full`.
-  void srmTriggerWearableRecompute({
-    int triggerType = 0,
-    required int asOfDay,
-  }) => _ffi.srmTriggerWearableRecompute(_handle, triggerType, asOfDay);
+  /// Rebuild the wearable reference from the daily values of the local dates
+  /// **before** [year]-[month]-[day], so a day never sits in its own baseline.
+  /// Call once a day after the day's values are pushed, with the date after
+  /// the last complete one. Returns `0`, `1004` (no such date), `1002` (the
+  /// engine was busy), `-1` (no pipeline), or `null` when the runtime does not
+  /// export the call.
+  int? srmRefreshWearableReference(int year, int month, int day) {
+    final fn = _ffi.srmRefreshWearableReference;
+    if (fn == null) return null;
+    final rc = fn(_handle, year, month, day);
+    return _checked(rc, failed: rc != 0);
+  }
+
+  /// Declare what kind of day [year]-[month]-[day] is, so the personal
+  /// baselines key behaviour by day type: `0` workday, `1` free day, `2`
+  /// leave, `3` sick, `4` travel, `5` on-call. Sick, leave and travel days
+  /// teach a separate side reference. Returns `0`, `1004`, `-1`, or `null`
+  /// when the runtime does not export the call.
+  int? srmSetDayType(int year, int month, int day, int dayType) {
+    final fn = _ffi.srmSetDayType;
+    if (fn == null) return null;
+    final rc = fn(_handle, year, month, day, dayType);
+    return _checked(rc, failed: rc != 0);
+  }
+
+  /// Which windows taught the personal baselines on [year]-[month]-[day], as
+  /// a JSON array of `{device, windows, digest}`. Null without a pipeline,
+  /// for a date that does not exist, or when the call is absent.
+  String? baselineWindowDigestJson(int year, int month, int day) {
+    final fn = _ffi.baselineWindowDigestJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle, year, month, day));
+  }
 
   void pushSleepStages(String json) {
     _withCString(json, (p) => _ffi.pushSleepStages(_handle, p));
@@ -1580,20 +1692,6 @@ class CoreRuntimeBridge {
   /// Get the last **live-head** `SleepScore` JSON
   /// (`rulepack://sleep_autonomic_v1`). Null if no window has completed.
   String? lastSleepScoreJson() => _readOrNote(_ffi.lastSleepScoreJson(_handle));
-
-  /// Export the longitudinal SRM snapshot for cross-launch persistence.
-  String? exportLongitudinalSnapshot() =>
-      _readOrNote(_ffi.exportLongitudinalSnapshot(_handle));
-
-  /// Restore the longitudinal SRM from a prior snapshot.
-  /// Returns the engine error code (0 on success).
-  int loadLongitudinalSnapshot(String json) {
-    return _withCString(json, (p) {
-          final rc = _ffi.loadLongitudinalSnapshot(_handle, p);
-          return _checked(rc, failed: rc != 0);
-        }) ??
-        -1;
-  }
 
   /// Get the current wearable reference, including Path-B
   /// `recent_sleep_score_median`. Null if no reference is set.
@@ -2518,13 +2616,123 @@ class CoreRuntimeBridge {
   // ── SRM / Baselines ──────────────────────────────────────────────────
 
   String? baselinesJson() => _readOrNote(_ffi.baselinesJson(_handle));
-  String? exportSrmSnapshot() => _readOrNote(_ffi.exportSrmSnapshot(_handle));
 
-  bool loadSrmSnapshot(String json) {
-    return _withCString(json, (p) {
-      final rc = _ffi.loadSrmSnapshot(_handle, p);
+  /// Every personal baseline (per-window references, daily values, consent
+  /// lineage, the sleep-score ring) as one opaque base64 snapshot. Store it as
+  /// private health data and never parse it. The runtime also seals it to its
+  /// own data directory, so a host that keeps that directory needs neither
+  /// this nor [loadBaselineSnapshot]. Null before any pipeline has run, or
+  /// when the runtime does not export the call.
+  String? exportBaselineSnapshot() {
+    final fn = _ffi.exportBaselineSnapshot;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
+  }
+
+  /// Restore a snapshot from [exportBaselineSnapshot]. Needs a running
+  /// pipeline. False when there is none, the text is not base64, or the
+  /// engine refused it (damaged, from a newer build, or another subject's);
+  /// the baselines are then left as they were.
+  bool loadBaselineSnapshot(String snapshotB64) {
+    final fn = _ffi.loadBaselineSnapshot;
+    if (fn == null) return false;
+    return _withCString(snapshotB64, (p) {
+      final rc = fn(_handle, p);
       return _checked(rc == 0, failed: rc != 0);
     });
+  }
+
+  /// Report whether keyboard and pointer/touch capture is running, from
+  /// [tsMs] on — including when the OS revokes its permission or the person
+  /// pauses capture. Without these reports a host that captures input never
+  /// certifies a window as rest, so resting HR and HRV never learn. A level:
+  /// it holds across session stop and start. True when accepted.
+  bool setInputCapture({required bool running, required int tsMs}) {
+    final fn = _ffi.setInputCapture;
+    if (fn == null) return false;
+    final rc = fn(_handle, running ? 1 : 0, tsMs);
+    return _checked(rc == 0, failed: rc != 0);
+  }
+
+  /// Report whether a call is on, from [tsMs] on, as the OS microphone or
+  /// camera indicator shows it. A level, like [setInputCapture]. True when
+  /// accepted.
+  bool setCallActive({required bool active, required int tsMs}) {
+    final fn = _ffi.setCallActive;
+    if (fn == null) return false;
+    final rc = fn(_handle, active ? 1 : 0, tsMs);
+    return _checked(rc == 0, failed: rc != 0);
+  }
+
+  /// Push a batch of typed inputs (the runtime's input envelope) as a JSON
+  /// array. Returns the batch's account as a map: `accepted`, `regressions`,
+  /// `late`, `invalid`, `not_stored`, `malformed`, `not_permitted`. Null with
+  /// no pipeline, input that is not a JSON array, or when the call is absent.
+  Map<String, dynamic>? pushInputsJson(String inputsJson) {
+    final fn = _ffi.pushInputsJson;
+    if (fn == null) return null;
+    return _withCString(inputsJson, (p) => _callJson(() => fn(_handle, p)));
+  }
+
+  /// Whether this host feeds the personal baselines what they need, judged
+  /// at [nowMs], as JSON. Act on every requirement whose `status` is `unmet`.
+  String? baselineRequirementsJson(int nowMs) {
+    final fn = _ffi.baselineRequirementsJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle, nowMs));
+  }
+
+  /// Personal-baseline events since the last call, oldest first (JSON
+  /// array). Device-only: they name the person's context cells.
+  String? srmDrainEventsJson() {
+    final fn = _ffi.srmDrainEventsJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
+  }
+
+  /// Forget part of the personal baselines at the person's request.
+  /// [scopeJson] is e.g. `{"scope":"everything"}`. Returns `0`, `1` (bad
+  /// scope), `1002` (busy), `-1` (no pipeline), or `null` when absent.
+  /// Snapshots the host exported earlier are the host's to delete.
+  int? srmForgetBaselines(String scopeJson) {
+    final fn = _ffi.srmForgetBaselines;
+    if (fn == null) return null;
+    return _withCString(scopeJson, (p) {
+      final rc = fn(_handle, p);
+      return _checked(rc, failed: rc != 0);
+    });
+  }
+
+  /// Register an episode direction ([directionJson] as the runtime defines
+  /// it). Returns the direction's key as JSON, or null when refused.
+  String? srmRegisterDirection(String directionJson) {
+    final fn = _ffi.srmRegisterDirection;
+    if (fn == null) return null;
+    return _withCString(directionJson, (p) => _readOrNote(fn(_handle, p)));
+  }
+
+  /// Start a new rest block at [tsMs] (a protocol's rest phase). Returns `0`,
+  /// `1002`, `-1`, or `null` when absent.
+  int? baselineBeginRestBlock(int tsMs) {
+    final fn = _ffi.baselineBeginRestBlock;
+    if (fn == null) return null;
+    final rc = fn(_handle, tsMs);
+    return _checked(rc, failed: rc != 0);
+  }
+
+  /// What the personal baselines know, as JSON. Device-only.
+  String? baselineProfileJson() {
+    final fn = _ffi.baselineProfileJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
+  }
+
+  /// The person's rhythm of active use as JSON, or the literal `null` before
+  /// any active minute. Device-only.
+  String? baselineRhythmJson() {
+    final fn = _ffi.baselineRhythmJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
   }
 
   Map<String, dynamic>? srmOverallStatus() {

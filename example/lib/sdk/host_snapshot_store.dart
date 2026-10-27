@@ -1,37 +1,25 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Persistence for the three runtime snapshots a mobile host owns (mobile host
-/// guide §7), plus the two scalars that go with them.
+/// Persistence for the one runtime snapshot a mobile host still owns (mobile
+/// host guide §7), plus the two scalars that go with it.
 ///
-/// ## Three, not one
+/// ## One, not three
 ///
-/// The runtime's own SQLite covers session *state* only. Everything the engine
-/// accumulates about the person lives in snapshots the host has to export and
-/// re-load, and each one loses something different if you skip it:
-///
-/// | Snapshot | Carries | Cost of skipping |
+/// | Snapshot | Carries | Who persists it |
 /// |---|---|---|
-/// | session state | Capacity, Mental Fatigue, Stress, Valence, context engine | every relaunch starts the stateful heads cold |
-/// | SRM | the personal baseline | baselines report `Warming` forever across launches |
-/// | longitudinal | wearable reference, 7-night sleep ring, today's partial daily accumulator | a mid-day relaunch discards the morning's cardiovascular load |
+/// | session state | Capacity, Mental Fatigue, Stress, Valence, context engine | **the host** — skip it and every relaunch starts the stateful heads cold |
+/// | personal baselines | every per-window reference, the daily values, the 7-night sleep ring | **the runtime** (0.42+): it seals one snapshot to its own data directory at session end, after every reference refresh and every 15 minutes while windows close, and restores it at startup |
 ///
-/// ## One SRM file per device class
-///
-/// The SRM key includes the declared `device_class`, because a cross-class load
-/// is rejected with `ERR_SRM_CONFIG_MISMATCH` — the baseline partition working
-/// as designed, not a bug. Storing one file for all classes means a phone and a
-/// tablet take turns invalidating each other's baseline and neither ever
-/// matures. A rejected load needs no handling beyond a log line; the engine
-/// starts cold.
+/// A host that keeps the runtime's data directory, as this one does, needs no
+/// baseline snapshot calls at all. `Synheart.exportBaselineSnapshot` /
+/// `loadBaselineSnapshot` exist for a host that persists somewhere else.
 ///
 /// ## `SharedPreferences` is the wrong backing store for a real app
 ///
 /// It is used here because the example already depends on it and the point is
-/// the call sequence, not the storage. These payloads are JSON blobs that grow
-/// with history — a production host writes them to files under the app's
-/// support directory, where a partial write can be made atomic with a
-/// write-and-rename and a corrupt blob can be replaced without taking the rest
-/// of the preferences file with it.
+/// the call sequence, not the storage. A production host writes the session
+/// state to a file under the app's support directory, where a partial write
+/// can be made atomic with a write-and-rename.
 class HostSnapshotStore {
   HostSnapshotStore(this._prefs, {required this.subjectId});
 
@@ -45,14 +33,12 @@ class HostSnapshotStore {
 
   /// Every key is subject-scoped. The runtime scopes storage, baselines and
   /// device identity to the subject, so a snapshot restored under a different
-  /// one would attribute one person's baseline to another.
+  /// one would attribute one person's state to another.
   final String subjectId;
 
   String get _sessionStateKey => 'host.session_state.$subjectId';
-  String _srmKey(String deviceClass) => 'host.srm.$subjectId.$deviceClass';
-  String get _longitudinalKey => 'host.longitudinal.$subjectId';
   String get _configIdKey => 'host.config_id.$subjectId';
-  String get _dayIndexKey => 'host.day_index.$subjectId';
+  String get _strainDateKey => 'host.closed_day_strain.$subjectId';
 
   // ── Session state ─────────────────────────────────────────────────────
 
@@ -61,25 +47,11 @@ class HostSnapshotStore {
   Future<void> writeSessionState(String json) =>
       _prefs.setString(_sessionStateKey, json);
 
-  // ── SRM ───────────────────────────────────────────────────────────────
-
-  String? readSrm(String deviceClass) => _prefs.getString(_srmKey(deviceClass));
-
-  Future<void> writeSrm(String deviceClass, String json) =>
-      _prefs.setString(_srmKey(deviceClass), json);
-
-  // ── Longitudinal ──────────────────────────────────────────────────────
-
-  String? readLongitudinal() => _prefs.getString(_longitudinalKey);
-
-  Future<void> writeLongitudinal(String json) =>
-      _prefs.setString(_longitudinalKey, json);
-
   // ── The comparability key (§9.5) ──────────────────────────────────────
 
-  /// The `config_id` the stored snapshots were produced under.
+  /// The `config_id` the stored snapshot was produced under.
   ///
-  /// Persisted beside them because a score computed under a different
+  /// Persisted beside it because a score computed under a different
   /// `config_id` is not comparable to a new one, and `config_id` changes
   /// whenever anything value-affecting changes — including the `sensing` and
   /// `mask_profile` declarations. Without this a host silently compares
@@ -88,46 +60,33 @@ class HostSnapshotStore {
 
   Future<void> writeConfigId(String id) => _prefs.setString(_configIdKey, id);
 
-  // ── Daily accumulator cursor (§8) ─────────────────────────────────────
+  // ── Closed-day strain cursor (§8) ─────────────────────────────────────
 
-  /// The last `day_index` handed to `roll_day`.
+  /// The local date (`YYYY-MM-DD`) whose closed-day Strain was last attached.
   ///
-  /// Kept because the index must **strictly advance** — a repeat or a negative
-  /// returns `ERR_DAILY_DAY_NOT_ADVANCING` — and after a relaunch the host has
-  /// no other way to know whether today has already been rolled.
-  int? readLastDayIndex() => _prefs.getInt(_dayIndexKey);
+  /// The engine closes each local day itself and keeps the closed day until
+  /// the next one closes, across a restart too, so attaching it at every
+  /// launch would send the same day's Strain again. This cursor makes it once
+  /// per date.
+  String? readLastStrainDate() => _prefs.getString(_strainDateKey);
 
-  Future<void> writeLastDayIndex(int dayIndex) =>
-      _prefs.setInt(_dayIndexKey, dayIndex);
+  Future<void> writeLastStrainDate(String date) =>
+      _prefs.setString(_strainDateKey, date);
 
   // ── Teardown ──────────────────────────────────────────────────────────
 
   /// Drop everything for this subject.
-  ///
-  /// [deviceClasses] must name every class whose SRM file might exist —
-  /// they are separate keys by design, so clearing only the current one leaves
-  /// the others behind for a future launch to load.
-  Future<void> clear({
-    Iterable<String> deviceClasses = const ['phone', 'tablet', 'watch'],
-  }) async {
+  Future<void> clear() async {
     await _prefs.remove(_sessionStateKey);
-    await _prefs.remove(_longitudinalKey);
     await _prefs.remove(_configIdKey);
-    await _prefs.remove(_dayIndexKey);
-    for (final c in deviceClasses) {
-      await _prefs.remove(_srmKey(c));
-    }
+    await _prefs.remove(_strainDateKey);
   }
 
-  /// Which snapshots are on disk, for a UI that has to show whether
-  /// persistence is actually working.
-  ///
-  /// Worth rendering: all three of these calls fail quietly, and a host that
-  /// exports every window and reloads nothing on launch looks identical to one
-  /// that is persisting correctly right up until the baselines never mature.
-  Map<String, int> storedSizes(String deviceClass) => <String, int>{
+  /// What is on disk, for a UI that has to show whether persistence is
+  /// actually working: a host that exports every window and reloads nothing
+  /// on launch looks identical to one that persists correctly until the
+  /// stateful heads never warm.
+  Map<String, int> storedSizes() => <String, int>{
     'session_state': readSessionState()?.length ?? 0,
-    'srm ($deviceClass)': readSrm(deviceClass)?.length ?? 0,
-    'longitudinal': readLongitudinal()?.length ?? 0,
   };
 }

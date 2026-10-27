@@ -37,6 +37,7 @@ import 'dart:io';
 import 'package:synheart_wear/synheart_wear.dart';
 
 import '../synheart.dart' show Synheart;
+import '../models/daily_metric.dart';
 import 'apple_health_runtime_sink.dart'
     show PushDailyCallback, TriggerRecomputeCallback;
 
@@ -60,8 +61,8 @@ class HealthConnectBackfillResult {
   final int daysIngested;
 
   /// Total `srmPushWearableDaily` calls fired across all days. Each
-  /// day can contribute up to 5 (resting_hr, hrv_rmssd, sleep_need,
-  /// deep_sleep_min, rem_sleep_min) depending on what the platform
+  /// day can contribute up to 5 (resting HR, overnight RMSSD, sleep
+  /// duration, deep and REM minutes) depending on what the platform
   /// returned.
   final int dimensionsPushed;
 
@@ -187,68 +188,41 @@ class HealthConnectRuntimeSink {
     var dimensionsPushed = 0;
     var daysIngested = 0;
     for (final day in allDays) {
-      final dayIndex = _epochDay(day);
+      // `day` is the local wake date the adapter keys nights by; only its
+      // calendar fields are read.
+      void push(String metric, double value) {
+        _pushDaily(
+          provider: _provider,
+          metric: metric,
+          date: day,
+          value: value,
+          vendorSummary: true,
+        );
+        dimensionsPushed += 1;
+      }
+
       var dayDidPush = false;
 
       final sleepNight = sleep[day];
       if (sleepNight != null && sleepNight.totalAsleepMinutes > 0) {
-        // sleep_need is in seconds (per the physiology spec).
-        _pushDaily(
-          dimension: 'sleep_need',
-          dayIndex: dayIndex,
-          value: sleepNight.totalAsleepMinutes * 60.0,
-          confidence: 0.85,
-          fidelity: 1,
-        );
-        dimensionsPushed += 1;
+        push(DailyMetric.sleepDurationS, sleepNight.totalAsleepMinutes * 60.0);
         dayDidPush = true;
-
-        if (sleepNight.deepMinutes != null && sleepNight.deepMinutes! > 0) {
-          _pushDaily(
-            dimension: 'deep_sleep_min',
-            dayIndex: dayIndex,
-            value: sleepNight.deepMinutes!,
-            confidence: 0.85,
-            fidelity: 1,
-          );
-          dimensionsPushed += 1;
-        }
-        if (sleepNight.remMinutes != null && sleepNight.remMinutes! > 0) {
-          _pushDaily(
-            dimension: 'rem_sleep_min',
-            dayIndex: dayIndex,
-            value: sleepNight.remMinutes!,
-            confidence: 0.85,
-            fidelity: 1,
-          );
-          dimensionsPushed += 1;
-        }
+        final deep = sleepNight.deepMinutes;
+        if (deep != null && deep > 0) push(DailyMetric.sleepDeepMin, deep);
+        final rem = sleepNight.remMinutes;
+        if (rem != null && rem > 0) push(DailyMetric.sleepRemMin, rem);
       }
 
       final overnightSummary = overnight[day];
       if (overnightSummary != null) {
-        if (overnightSummary.hrvRmssdMs != null &&
-            overnightSummary.hrvRmssdMs! > 0) {
-          _pushDaily(
-            dimension: 'hrv_rmssd',
-            dayIndex: dayIndex,
-            value: overnightSummary.hrvRmssdMs!,
-            confidence: 0.85,
-            fidelity: 1,
-          );
-          dimensionsPushed += 1;
+        final rmssd = overnightSummary.hrvRmssdMs;
+        if (rmssd != null && rmssd > 0) {
+          push(DailyMetric.overnightRmssdMs, rmssd);
           dayDidPush = true;
         }
-        if (overnightSummary.restingHrBpm != null &&
-            overnightSummary.restingHrBpm! > 0) {
-          _pushDaily(
-            dimension: 'resting_hr',
-            dayIndex: dayIndex,
-            value: overnightSummary.restingHrBpm!,
-            confidence: 0.85,
-            fidelity: 1,
-          );
-          dimensionsPushed += 1;
+        final restingHr = overnightSummary.restingHrBpm;
+        if (restingHr != null && restingHr > 0) {
+          push(DailyMetric.restingHrBpm, restingHr);
           dayDidPush = true;
         }
       }
@@ -271,37 +245,23 @@ class HealthConnectRuntimeSink {
     );
   }
 
-  /// Convert a local-time wake date (as returned by
-  /// `HealthAdapter.fetchSleepNights`) to the unix-epoch day index
-  /// the SRM uses. Always operates in UTC so the day boundary is
-  /// stable across timezone changes — matches the semantics of
-  /// `Synheart.epochDayFor`.
-  static int _epochDay(DateTime localDay) {
-    final utcMidnight = DateTime.utc(
-      localDay.year,
-      localDay.month,
-      localDay.day,
-    );
-    return utcMidnight.millisecondsSinceEpoch ~/ 86_400_000;
-  }
+  static const _provider = 'health_connect';
 
-  static void _defaultPushDaily({
-    required String dimension,
-    required int dayIndex,
+  static int _defaultPushDaily({
+    required String provider,
+    required String metric,
+    required DateTime date,
     required double value,
-    double confidence = 0.85,
-    int fidelity = 1,
-  }) {
-    Synheart.srmPushWearableDaily(
-      dimension: dimension,
-      dayIndex: dayIndex,
-      value: value,
-      confidence: confidence,
-      fidelity: fidelity,
-    );
-  }
+    bool vendorSummary = true,
+  }) => Synheart.srmPushWearableDaily(
+    provider: provider,
+    metric: metric,
+    date: date,
+    value: value,
+    vendorSummary: vendorSummary,
+  );
 
   static void _defaultTriggerRecompute() {
-    Synheart.srmTriggerWearableRecompute();
+    Synheart.srmRefreshWearableReference();
   }
 }
