@@ -6,12 +6,15 @@ import 'package:synheart_core/src/config/synheart_config.dart';
 /// Guards the four host declarations on their way into `synheart_core_new`.
 ///
 /// The property that matters most is the **absence** of a key. Undeclared and
-/// declared-as-default are different states to the runtime: undeclared
-/// reproduces pre-0.16.0 behaviour exactly, whereas declaring `device_class`
-/// folds into the SRM `config_hash` and invalidates every persisted baseline
-/// (`ERR_SRM_CONFIG_MISMATCH`, then a 30-observation re-warm across 3 days).
-/// A default that leaked a key into this map would reset every field user's
-/// baselines on upgrade, silently.
+/// declared-as-default are different states to the runtime: an undeclared
+/// sensing, mask or CFI declaration reproduces pre-0.16.0 behaviour exactly,
+/// so a default that leaked one of those keys would change every field user's
+/// output on upgrade, silently.
+///
+/// `device_class` is the exception, by design: since runtime 0.42 an
+/// undeclared class files behaviour baselines under `unknown`, and declaring
+/// one resets nothing else (one snapshot holds every class), so it defaults
+/// to `"auto"`.
 void main() {
   SynheartConfig configWith({
     HostDeclarations declarations = const HostDeclarations(),
@@ -26,11 +29,11 @@ void main() {
   );
 
   group('undeclared is the default', () {
-    test('emits none of the four keys', () {
+    test('emits none of the opt-in keys, and device_class "auto"', () {
       final map = buildRuntimeConfigMap(configWith());
 
       expect(map.containsKey('sensing'), isFalse);
-      expect(map.containsKey('device_class'), isFalse);
+      expect(map['device_class'], 'auto');
       expect(map.containsKey('mask_profile'), isFalse);
       expect(map.containsKey('cfi_structural_components'), isFalse);
       expect(map.containsKey('notifications_observable'), isFalse);
