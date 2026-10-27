@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-27
+
+Recommends runtime 0.43.0 (C ABI 4.1): `synheart install runtime --version 0.43.0`.
+Runtime 0.42.x (C ABI 4.0) still loads; on it `schemaNeedsConsent()` is false and
+`hsmSchemaConsent()` null.
+
 ### Added
 
 - **`Synheart.schemaNeedsConsent()`: ask again when the app's HSM Schema
