@@ -1841,6 +1841,14 @@ class CoreRuntimeBridge {
     return _callJson(() => _ffi.currentConsent(_handle));
   }
 
+  /// What the app's HSM Schema needs from the person; null on a runtime that
+  /// does not export it.
+  Map<String, dynamic>? hsmSchemaConsent() {
+    final fn = _ffi.hsmSchemaConsent;
+    if (fn == null) return null;
+    return _callJson(() => fn(_handle));
+  }
+
   bool consentConfigureCloud(String baseUrl, String appId) {
     final pBase = baseUrl.toNativeUtf8();
     final pApp = appId.toNativeUtf8();

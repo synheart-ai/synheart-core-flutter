@@ -18,6 +18,7 @@ import 'modules/base/synheart_module.dart';
 import 'modules/capabilities/capability_module.dart';
 import 'modules/consent/consent_effective_state.dart';
 import 'modules/consent/consent_form.dart';
+import 'modules/consent/hsm_schema_consent.dart';
 import 'modules/consent/consent_module.dart';
 import 'modules/interfaces/capability_provider.dart';
 import 'modules/interfaces/consent_provider.dart';
@@ -2995,6 +2996,36 @@ class Synheart {
   static Stream<ConsentSnapshot> get consentChanges {
     return shared._consentModule?.observe() ??
         const Stream<ConsentSnapshot>.empty();
+  }
+
+  /// What the app's published HSM Schema needs from the person before the
+  /// runtime can collect all of it.
+  ///
+  /// A newer schema version can add an input the person was never asked
+  /// about. The runtime keeps it off until they consent; this tells the app
+  /// which channels to ask about. Returns `null` when the runtime is not
+  /// loaded or predates this call (C ABI 4.1).
+  static HsmSchemaConsent? hsmSchemaConsent() {
+    final raw = _coreRuntime?.hsmSchemaConsent();
+    if (raw == null) return null;
+    return HsmSchemaConsent.fromRuntimeJson(raw);
+  }
+
+  /// Whether the app should show the consent form again because its HSM
+  /// Schema declares inputs the person has not been asked about.
+  ///
+  /// Check it after [initialize] and after submitting the consent form (the
+  /// runtime refreshes the schema at both):
+  ///
+  /// ```dart
+  /// if (Synheart.schemaNeedsConsent()) {
+  ///   // Show the consent form again, e.g. with consentGetEditableFormTyped().
+  /// }
+  /// ```
+  ///
+  /// `false` when there is nothing to ask, or the runtime cannot say.
+  static bool schemaNeedsConsent() {
+    return hsmSchemaConsent()?.needsConsent ?? false;
   }
 
   /// Whether consent token should be refreshed soon.
