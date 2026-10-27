@@ -7,13 +7,13 @@
 ///
 /// | Declaration | What changes the moment you declare it |
 /// |---|---|
-/// | [deviceClass] | Folds into the SRM `config_hash`. **Every persisted baseline snapshot stops loading** (`ERR_SRM_CONFIG_MISMATCH`) and the person re-warms 30 observations across 3 distinct days. |
+/// | [deviceClass] | Which class's behaviour baselines the device teaches. One snapshot holds every class (runtime 0.42+), so a change starts that class from zero and keeps the others. **Defaults to `"auto"`** when left null: an undeclared class files behaviour baselines under `unknown`. |
 /// | [sensing] | Appended to `config_id`. `episodic` additionally **withholds Capacity and Mental Fatigue** from every frame. |
 /// | [maskProfile] `mobile` | Admits the hesitation bit in the `Communication` and `WritingEditing` context rows — moves Focus and Cognitive Load. |
 /// | [cfiStructuralComponents] `4` | **Lowers** `conf_CFI` for identical evidence: it widens the coverage denominator. That direction surprises people. |
 ///
 /// Declare them once at first launch and keep them stable. Changing
-/// [deviceClass] mid-life is a baseline reset, not a config tweak.
+/// [deviceClass] mid-life starts that class's behaviour baselines from zero.
 ///
 /// `"auto"` resolves through core-runtime's `engine::host_declarations` tables
 /// from the config's `platform` string, and is the recommended setting for a
@@ -142,9 +142,8 @@ class HostDeclarations {
   /// `"auto"`, or an explicit [SensingProfile]. Null sends nothing.
   final Object? sensing;
 
-  /// `"auto"` or a [DeviceClass]. Null sends nothing.
-  ///
-  /// **Declaring this invalidates every persisted SRM baseline.**
+  /// `"auto"` or a [DeviceClass]. Null sends `"auto"`: since runtime 0.42 an
+  /// undeclared class files behaviour baselines under `unknown`.
   final Object? deviceClass;
 
   /// `"auto"` or a [MaskProfile]. Null sends nothing.
@@ -173,8 +172,6 @@ class HostDeclarations {
   /// All four resolved from the config's `platform` string by core-runtime's
   /// own tables. The maintained answer — prefer it to re-deriving per app.
   ///
-  /// Note this includes [deviceClass], so the first launch after adopting it
-  /// resets persisted SRM baselines.
   static const HostDeclarations auto = HostDeclarations(
     sensing: 'auto',
     deviceClass: 'auto',

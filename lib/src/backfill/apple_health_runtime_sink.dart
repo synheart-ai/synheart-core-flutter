@@ -37,6 +37,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:synheart_wear/synheart_wear.dart';
 
 import '../core_runtime/ffi_bindings.dart' show SynheartCoreFFI;
+import '../models/daily_metric.dart';
 import '../synheart.dart' show Synheart;
 import 'apple_xml_backfill_sink.dart';
 
@@ -45,17 +46,32 @@ import 'apple_xml_backfill_sink.dart';
 /// function reference can be used directly. Injectable so tests can
 /// substitute a recorder without booting the whole runtime.
 typedef PushDailyCallback =
-    void Function({
-      required String dimension,
-      required int dayIndex,
+    int Function({
+      required String provider,
+      required String metric,
+      required DateTime date,
       required double value,
-      double confidence,
-      int fidelity,
+      bool vendorSummary,
     });
 
-/// Callback signature for triggering a longitudinal recompute. Mirrors
-/// [Synheart.srmTriggerWearableRecompute]'s shape (no required args).
+/// Callback signature for refreshing the wearable reference after a batch.
+/// Mirrors [Synheart.srmRefreshWearableReference]'s shape (no required args).
 typedef TriggerRecomputeCallback = void Function();
+
+/// The key the backfill sinks file a day under: the local calendar date of
+/// [epochMs], as days since 1970-01-01. The runtime files daily values under
+/// the person's local date, so a night that ends at 02:00 local must not land
+/// on the UTC date (the previous day east of UTC).
+int localDayKey(int epochMs) {
+  final l = DateTime.fromMillisecondsSinceEpoch(epochMs);
+  return DateTime.utc(l.year, l.month, l.day).millisecondsSinceEpoch ~/
+      86_400_000;
+}
+
+/// The local calendar date a [localDayKey] stands for. Only its year, month
+/// and day mean anything.
+DateTime dateOfLocalDayKey(int key) =>
+    DateTime.fromMillisecondsSinceEpoch(key * 86_400_000, isUtc: true);
 
 /// High-level `AppleXmlIngestSink` that bridges an Apple Health
 /// `export.zip` import to the runtime SRM.
@@ -176,24 +192,22 @@ class AppleHealthRuntimeSink implements AppleXmlIngestSink {
     throw StateError('unhandled SampleValue: $v');
   }
 
-  static void _defaultPushDaily({
-    required String dimension,
-    required int dayIndex,
+  static int _defaultPushDaily({
+    required String provider,
+    required String metric,
+    required DateTime date,
     required double value,
-    double confidence = 0.85,
-    int fidelity = 1,
-  }) {
-    Synheart.srmPushWearableDaily(
-      dimension: dimension,
-      dayIndex: dayIndex,
-      value: value,
-      confidence: confidence,
-      fidelity: fidelity,
-    );
-  }
+    bool vendorSummary = true,
+  }) => Synheart.srmPushWearableDaily(
+    provider: provider,
+    metric: metric,
+    date: date,
+    value: value,
+    vendorSummary: vendorSummary,
+  );
 
   static void _defaultTriggerRecompute() {
-    Synheart.srmTriggerWearableRecompute();
+    Synheart.srmRefreshWearableReference();
   }
 }
 
@@ -280,7 +294,7 @@ class AppleHealthDailyAggregator {
         if (v is! QuantityValue) return;
         final bpm = v.value;
         if (bpm < 40.0 || bpm > 100.0) return;
-        final day = s.startMs ~/ 86_400_000;
+        final day = localDayKey(s.startMs);
         (_hrProxyByDay[day] ??= _RunningMean()).add(bpm);
         break;
       case AppleHealthMetric.restingHeartRate:
@@ -295,7 +309,7 @@ class AppleHealthDailyAggregator {
         // Apple typically publishes one daily value per day, but we
         // accumulate as a running mean for safety against duplicate
         // exports / multiple sources.
-        final day = s.startMs ~/ 86_400_000;
+        final day = localDayKey(s.startMs);
         (_restingHrByDay[day] ??= _RunningMean()).add(bpm);
         break;
       case AppleHealthMetric.sleepStage:
@@ -304,7 +318,7 @@ class AppleHealthDailyAggregator {
         final durationMs = s.endMs - s.startMs;
         if (durationMs <= 0) return;
         final minutes = durationMs / 60_000.0;
-        final day = s.endMs ~/ 86_400_000;
+        final day = localDayKey(s.endMs);
         final stages = _sleepByDay[day] ??= <String, double>{};
         stages[v.stage.raw] = (stages[v.stage.raw] ?? 0.0) + minutes;
         break;
@@ -318,7 +332,7 @@ class AppleHealthDailyAggregator {
         // impossible from a healthy heart on a watch-grade sensor —
         // treat as artefact.
         if (ms < 5.0 || ms > 250.0) return;
-        final day = s.startMs ~/ 86_400_000;
+        final day = localDayKey(s.startMs);
         (_sdnnByDay[day] ??= _RunningMean()).add(ms);
         break;
       case AppleHealthMetric.steps:
@@ -332,55 +346,42 @@ class AppleHealthDailyAggregator {
     }
   }
 
-  /// Drain the rollup via [pushDaily]. Confidence values reflect the
-  /// derivation path:
-  /// - `resting_hr` from filtered daily-mean HR: 0.75 (proxy, not a
-  ///   true vendor-computed resting metric).
-  /// - Sleep stage aggregates: 0.85 (vendor-grade — Apple's sleep
-  ///   classifier already cleaned the data).
+  /// Drain the rollup via [pushDaily], one call per (local date, metric),
+  /// all from provider `apple_health`. A vendor-computed value is pushed as a
+  /// provider summary; the resting-HR proxy (filtered daily-mean HR, derived
+  /// in-app) as a value computed from raw samples, and only for dates Apple
+  /// published no resting HR for.
   void replayInto(PushDailyCallback pushDaily) {
-    // Vendor-computed resting HR wins per-day. We push that with
-    // higher confidence (0.85, vendor summary) and fidelity 1.
+    void push(String metric, int day, double value, {bool summary = true}) =>
+        pushDaily(
+          provider: _provider,
+          metric: metric,
+          date: dateOfLocalDayKey(day),
+          value: value,
+          vendorSummary: summary,
+        );
+
+    // Vendor-computed resting HR wins per day.
     for (final entry in _restingHrByDay.entries) {
       final mean = entry.value.mean;
       if (mean == null) continue;
-      pushDaily(
-        dimension: 'resting_hr',
-        dayIndex: entry.key,
-        value: mean,
-        confidence: 0.85,
-        fidelity: 1, // vendor-derived (Apple's onboard sleep classifier)
-      );
+      push(DailyMetric.restingHrBpm, entry.key, mean);
     }
-    // Proxy fallback: only push for days where the vendor didn't
-    // publish a resting_hr sample. Avoids double-pushing (which
-    // would duplicate-count for distinct-day baseline progression).
+    // Proxy fallback: only for days where the vendor didn't publish a
+    // resting HR. Pushing both would replace the vendor value (a date is
+    // written once per metric) with the weaker proxy.
     for (final entry in _hrProxyByDay.entries) {
       if (_restingHrByDay.containsKey(entry.key)) continue;
       final mean = entry.value.mean;
       if (mean == null) continue;
-      pushDaily(
-        dimension: 'resting_hr',
-        dayIndex: entry.key,
-        value: mean,
-        confidence: 0.75,
-        fidelity: 0, // raw observation derived in-app
-      );
+      push(DailyMetric.restingHrBpm, entry.key, mean, summary: false);
     }
-    // SDNN daily mean → hrv_sdnn. Apple Watch's classifier already
-    // computes SDNN from clean RR within the 5-minute interval, so
-    // confidence sits at vendor-summary level (0.85) rather than
-    // the proxy-tier 0.75 we use for resting_hr.
+    // Apple Watch computes SDNN onboard from clean RR, so it is a vendor
+    // summary.
     for (final entry in _sdnnByDay.entries) {
       final mean = entry.value.mean;
       if (mean == null) continue;
-      pushDaily(
-        dimension: 'hrv_sdnn',
-        dayIndex: entry.key,
-        value: mean,
-        confidence: 0.85,
-        fidelity: 1, // vendor-derived (Apple computes SDNN onboard)
-      );
+      push(DailyMetric.overnightSdnnMs, entry.key, mean);
     }
     for (final entry in _sleepByDay.entries) {
       final stages = entry.value;
@@ -390,35 +391,14 @@ class AppleHealthDailyAggregator {
       final rem = stages[SleepStage.rem.raw] ?? 0.0;
       final totalMinutes = asleep + light + deep + rem;
       if (totalMinutes > 0) {
-        // sleep_need is in seconds (per the physiology spec).
-        pushDaily(
-          dimension: 'sleep_need',
-          dayIndex: entry.key,
-          value: totalMinutes * 60.0,
-          confidence: 0.85,
-          fidelity: 1,
-        );
+        push(DailyMetric.sleepDurationS, entry.key, totalMinutes * 60.0);
       }
-      if (deep > 0) {
-        pushDaily(
-          dimension: 'deep_sleep_min',
-          dayIndex: entry.key,
-          value: deep,
-          confidence: 0.85,
-          fidelity: 1,
-        );
-      }
-      if (rem > 0) {
-        pushDaily(
-          dimension: 'rem_sleep_min',
-          dayIndex: entry.key,
-          value: rem,
-          confidence: 0.85,
-          fidelity: 1,
-        );
-      }
+      if (deep > 0) push(DailyMetric.sleepDeepMin, entry.key, deep);
+      if (rem > 0) push(DailyMetric.sleepRemMin, entry.key, rem);
     }
   }
+
+  static const _provider = 'apple_health';
 }
 
 /// Welford-style running mean. Avoids accumulator-overflow on

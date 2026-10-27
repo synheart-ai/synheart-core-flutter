@@ -476,6 +476,17 @@ class BehaviorConfig {
   /// equivalent, so the self-report is the ceiling there.
   final ForegroundAppSource? foregroundAppSource;
 
+  /// Report to the runtime when input capture is running, which is what lets
+  /// a still window count as rest and teach the resting heart rate and HRV.
+  ///
+  /// On by default: the SDK reports capture running while it tracks behaviour
+  /// **and** the app is in the foreground, because its touch and typing
+  /// capture is in-app only — reporting it running in the background would
+  /// certify windows as input-free while the person types elsewhere. Turn it
+  /// off when the host captures input outside the app (a system keyboard,
+  /// say) and reports it itself with `Synheart.setInputCapture`.
+  final bool reportInputCapture;
+
   const BehaviorConfig({
     this.enableGestureTracking = true,
     this.enableTypingTracking = true,
@@ -485,6 +496,7 @@ class BehaviorConfig {
     this.reportForegroundApp = true,
     this.foregroundAppId,
     this.foregroundAppSource,
+    this.reportInputCapture = true,
   });
 }
 
