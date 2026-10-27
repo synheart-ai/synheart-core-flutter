@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-27
+
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at
 load, and runtime 0.42 is refused by every earlier SDK. Install it with
 `synheart install runtime --version 0.42.1`. Expect one cold start on the
@@ -73,6 +75,15 @@ error to handle.
   locked at boot) reinstalls the crypto callbacks and re-reads the identity
   before trying again, and registers only if the device is still
   unregistered, so a second `device_id` is never minted over the first.
+
+## [0.19.0] - 2026-10-26
+
+Breaking for two APIs. `Synheart.getSyncStatus()` is removed: use
+`Synheart.syncStatus()`. `ReadinessScoreInput` now takes `recoveryScore` and
+`sleepScore` (plus optional `alignment`, cold-start flags and `baselineDays`)
+in place of the workload, fatigue and history contexts, which are removed.
+Both are detailed below. Runtimes from 0.20.0 to 0.41.x are supported; 0.41.0
+is recommended.
 
 ### Added
 
