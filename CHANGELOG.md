@@ -106,6 +106,12 @@ is recommended.
 
 ### Added
 
+- **`SynheartConfig.modelBackend`: choose the engine's model backend.**
+  `ModelBackend.kinematicOnnx` lets the learned kinematic model report
+  activity, postural and locomotion state while every other head keeps its
+  deterministic formula; `ModelBackend.rulepackOnly` is the engine default.
+  Null sends nothing and leaves the runtime's default. Needs a runtime with the
+  `model_backend` config key and ONNX support.
 - **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
   daily scores reach the cloud.** Each computes the score, as
   `computeRecoveryScore` / `computeReadinessScore` do, and queues it to ride

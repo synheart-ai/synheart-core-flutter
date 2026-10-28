@@ -90,6 +90,7 @@ Map<String, dynamic> buildRuntimeConfigMap(
     // harmless but makes a config diff read as if the host made a choice it
     // did not make.
     if (config.emitDiagnostics) 'emit_diagnostics': true,
+    if (config.modelBackend != null) 'model_backend': config.modelBackend!.wire,
     if (config.researchBaseline) 'research_baseline': true,
     if (config.strictChannelConsent) 'strict_channel_consent': true,
     // Host declarations are spread rather than nested: the runtime reads
