@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-30
+
 Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
-load. The daily score inputs changed shape with ABI 4.2 and neither shape
-parses on the other runtime, so there is no fallback.
+load. Install it with `synheart install runtime --version 0.45.0`. The daily
+score inputs changed shape with ABI 4.2 and neither shape parses on the other
+runtime, so there is no fallback.
 
 ### Migrating
 
@@ -27,6 +30,12 @@ parses on the other runtime, so there is no fallback.
 
 ### Added
 
+- **`SynheartConfig.modelBackend`: choose the engine's model backend.**
+  `ModelBackend.kinematicOnnx` lets the learned kinematic model report
+  activity, postural and locomotion state while every other head keeps its
+  deterministic formula; `ModelBackend.rulepackOnly` is the engine default.
+  Null sends nothing and leaves the runtime's default. Needs a runtime with the
+  `model_backend` config key and ONNX support.
 - `Synheart.dailyBaselineRefs()` and `Synheart.dailySleepBaselines()`: the
   daily scores' personal baselines, read after
   `srmRefreshWearableReference()`. `SleepBaselines`, `DailyRef`,
@@ -160,12 +169,6 @@ is recommended.
 
 ### Added
 
-- **`SynheartConfig.modelBackend`: choose the engine's model backend.**
-  `ModelBackend.kinematicOnnx` lets the learned kinematic model report
-  activity, postural and locomotion state while every other head keeps its
-  deterministic formula; `ModelBackend.rulepackOnly` is the engine default.
-  Null sends nothing and leaves the runtime's default. Needs a runtime with the
-  `model_backend` config key and ONNX support.
 - **`Synheart.attachRecoveryScore()` and `Synheart.attachReadinessScore()`:
   daily scores reach the cloud.** Each computes the score, as
   `computeRecoveryScore` / `computeReadinessScore` do, and queues it to ride
