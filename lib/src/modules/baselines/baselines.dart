@@ -659,6 +659,13 @@ class Baselines {
       // claims the per-night dedupe slot + attaches into the engine
       // ring. Lower-priority variants only record their result for
       // the swipe-card UI.
+      // The personal baselines the score reads, as of the last reference
+      // refresh. The refresh builds from the dates before today, and every
+      // earlier night was pushed and refreshed when it arrived, so reading
+      // here, before tonight's own push, is the order the runtime expects.
+      // Shared by every variant: they score the same night.
+      final sleepBaselines = Synheart.dailySleepBaselines();
+
       SleepScoreResult? primary;
       for (var i = 0; i < variants.length; i++) {
         final v = variants[i];
@@ -667,8 +674,11 @@ class Baselines {
           // Priors are shared across variants of the same night —
           // they're a function of *prior* nights' rich context, not
           // of which view we're scoring tonight. Reversed so the
-          // engine sees newest-first.
+          // engine sees newest-first. Only the two newest are read
+          // (sleep debt); the baselines carry the rest.
           priorsNewestFirst: _recentNights.reversed.toList(growable: false),
+          tonightMidpointH: _sleepMidpointH(v.raw),
+          baselines: sleepBaselines,
         );
         // The full JSON dump (priors array + per-night sleep details) is
         // both noisy and contains PII; emit only a summary at stream-level
@@ -1418,6 +1428,22 @@ class Baselines {
     );
   }
 
+  /// The night's local sleep midpoint in hours, from its session start and
+  /// end, or null when the source gives no timing. Never derived from totals:
+  /// a null leaves the Sleep Score's consistency out, with no penalty.
+  static double? _sleepMidpointH(NightRaw raw) {
+    final detail = raw.detail;
+    if (detail is SegmentedNight) {
+      return _midpointHoursLocal(detail.sessionStartMs, detail.sessionEndMs);
+    }
+    if (detail is AggregatedNight &&
+        detail.sessionStartMs != null &&
+        detail.sessionEndMs != null) {
+      return _midpointHoursLocal(detail.sessionStartMs!, detail.sessionEndMs!);
+    }
+    return null;
+  }
+
   /// Local-time midpoint of the sleep session, in hours (0..24). Used
   /// for the Recovery Score's circular consistency check.
   static double _midpointHoursLocal(int startMs, int endMs) {
@@ -1426,24 +1452,6 @@ class Baselines {
       isUtc: false,
     );
     return mid.hour + mid.minute / 60.0 + mid.second / 3600.0;
-  }
-
-  /// Read [WearableReferenceView]'s SRM dimensions for HRV + RHR and
-  /// shape them as [BaselineRefs]. Returns `null` if either dimension
-  /// is missing — the engine will then dispatch Stages 1/2 instead.
-  static BaselineRefs? _baselinesFromReference(WearableReferenceView? ref) {
-    if (ref == null) return null;
-    final hrv = ref.dimensions['hrv_rmssd_ms']?.toDouble();
-    final hrvConf = ref.confidence['hrv_rmssd_ms'];
-    final rhr = ref.dimensions['resting_hr_bpm']?.toDouble();
-    final rhrConf = ref.confidence['resting_hr_bpm'];
-    if (hrv == null || rhr == null) return null;
-    return BaselineRefs(
-      hrvRmssdMs: hrv,
-      hrvConfidence: hrvConf ?? 0.0,
-      restingHrBpm: rhr,
-      rhrConfidence: rhrConf ?? 0.0,
-    );
   }
 
   /// Attach [result] for [wakeDay] so it rides the next emitted HSI, unless
@@ -1568,7 +1576,10 @@ class Baselines {
         priors: priorNights,
         overnight: tonightOvernight,
         priorsOvernight: priorOvernight,
-        baselines: _baselinesFromReference(_latestReference),
+        // The runtime's own daily references, read after the night's push
+        // and refresh. Null until overnight RMSSD and resting HR both have
+        // one, and the engine then scores stage 1 or 2.
+        baselines: Synheart.dailyBaselineRefs(),
       );
 
       final day = tonightRaw.wakeCalendarDate;
@@ -1958,8 +1969,10 @@ class Baselines {
       isUtc: true,
     );
     var pushed = false;
-    void push(String metric, double? value) {
-      if (value == null || value <= 0) return;
+    // A zero is no measurement for every metric here except the midpoint,
+    // where 0.0 is midnight.
+    void push(String metric, double? value, {bool zeroIsValue = false}) {
+      if (value == null || value < 0 || (value == 0 && !zeroIsValue)) return;
       final rc = Synheart.srmPushWearableDaily(
         provider: provider,
         metric: metric,
@@ -1982,7 +1995,14 @@ class Baselines {
     push(DailyMetric.overnightHrSdBpm, overnight.hrStdBpm);
     push(DailyMetric.stepsCount, overnight.stepsCount);
     push(DailyMetric.overnightRmssdMs, overnight.hrvRmssdMs);
+    // One overnight heart-rate figure feeds both baselines: the night's mean
+    // HR is the Sleep Score's HR baseline, and without a resting-HR baseline
+    // Recovery cannot personalise nor Readiness align. A source with a
+    // separate resting HR would push that one as `restingHrBpm` instead.
+    push(DailyMetric.overnightHrBpm, overnight.overnightHrBpm);
     push(DailyMetric.restingHrBpm, overnight.overnightHrBpm);
+    // Only a night with a start and end has a midpoint; never derived.
+    push(DailyMetric.sleepMidpointH, _sleepMidpointH(raw), zeroIsValue: true);
 
     final detail = raw.detail;
     if (detail is AggregatedNight) {
@@ -2031,7 +2051,7 @@ class Baselines {
         );
         return;
       }
-      final base = _baselinesFromReference(_latestReference);
+      final base = Synheart.dailyBaselineRefs();
       final hrSleep = overnight.overnightHrBpm;
       final rmssdSleep = overnight.hrvRmssdMs;
       final input = ReadinessScoreInput(
@@ -2050,7 +2070,7 @@ class Baselines {
             : null,
         recoveryColdStart: recovery.stage == RecoveryStage.firstDay,
         sleepColdStart: sleep.mode == SleepScoreMode.coldStart,
-        baselineDays: _baselineDays(),
+        baselineMaturity: base?.maturity ?? 0,
       );
       final result = _scoreReadiness(day, input);
       if (result == null) {
@@ -2086,14 +2106,6 @@ class Baselines {
       if (r != null && (path == null || r.path == path)) return r;
     }
     return byVariant[provider];
-  }
-
-  /// Days of HR/HRV history behind tonight's baseline: prior nights in the
-  /// window that carried overnight HR or HRV. Drives readiness confidence;
-  /// under 2 marks the baseline immature.
-  static int _baselineDays() {
-    final withSignal = _recentOvernight.where((o) => o.hasSignal).length;
-    return withSignal > 0 ? withSignal - 1 : 0;
   }
 
   /// Public host hook to compute a Readiness Score from the host's own

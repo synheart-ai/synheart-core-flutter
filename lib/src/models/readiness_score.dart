@@ -157,9 +157,11 @@ class ReadinessScoreInput {
   /// Today's Sleep Score is a cold-start estimate (Sleep mode 1).
   final bool sleepColdStart;
 
-  /// Days of HR/HRV baseline history accumulated. Under 2 marks the baseline
-  /// immature; confidence matures towards 7.
-  final int baselineDays;
+  /// Maturity of the overnight HR/HRV baselines, `0..1`: the lower of the
+  /// two confidences in [Synheart.dailyBaselineRefs] (see
+  /// [BaselineRefs.maturity]), or `0` when it returns null. At or below `0.30`
+  /// the baseline counts as immature.
+  final double baselineMaturity;
 
   const ReadinessScoreInput({
     required this.recoveryScore,
@@ -167,7 +169,7 @@ class ReadinessScoreInput {
     this.alignment,
     this.recoveryColdStart = false,
     this.sleepColdStart = false,
-    this.baselineDays = 0,
+    this.baselineMaturity = 0,
   });
 
   Map<String, Object?> toJson() => {
@@ -176,7 +178,9 @@ class ReadinessScoreInput {
     'alignment': alignment?.toJson(),
     'recovery_cold_start': recoveryColdStart,
     'sleep_cold_start': sleepColdStart,
-    'baseline_days': baselineDays < 0 ? 0 : baselineDays,
+    'baseline_maturity': baselineMaturity.isFinite
+        ? baselineMaturity.clamp(0.0, 1.0)
+        : 0.0,
   };
 
   String toJsonString() => jsonEncode(toJson());

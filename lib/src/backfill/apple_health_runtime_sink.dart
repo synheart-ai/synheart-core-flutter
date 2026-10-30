@@ -221,43 +221,34 @@ class AppleHealthRuntimeSink implements AppleXmlIngestSink {
 /// a test harness that asserts on the rollup, or a vendor sync that
 /// wants to apply the same shape to non-Apple data).
 ///
-/// **Aggregations:**
+/// **Aggregations**, by [DailyMetric] name:
 ///
 /// - **`restingHeartRate` samples** (Apple's vendor-computed daily
-///   resting HR from `HKQuantityTypeIdentifierRestingHeartRate`) →
-///   daily mean → `resting_hr` (confidence 0.85, vendor summary).
-///   This is the preferred path: Apple's sleep classifier picks the
-///   lowest stable HR window per night, which is structurally what
-///   we want. When present for a day, the proxy below is *not* used
-///   for that day — vendor wins.
+///   resting HR) → daily mean → `cardiac.resting_hr_bpm`, as a vendor
+///   summary. When present for a day, the proxy below is *not* used for
+///   that day: vendor wins.
 ///
-/// - **HR samples in [40, 100] BPM** → daily mean → `resting_hr`
-///   (confidence 0.75, raw observation derived in-app). Fallback for
-///   days with no `restingHeartRate` sample (e.g. early imports or
-///   non-Apple-Watch sources). Filter is a coarse exercise/artefact
-///   reject — `< 40` is usually a sensor artefact, `> 100` is
-///   exercise / startle / not resting.
+/// - **HR samples in [40, 100] BPM** → daily mean →
+///   `cardiac.resting_hr_bpm`, as a value computed in-app. Fallback for
+///   days with no `restingHeartRate` sample (early imports, non-Watch
+///   sources). The filter is a coarse exercise/artefact reject.
 ///
-/// - **Sleep stages** → minutes per category per night. Each block is
-///   attributed to the day_index of its `endMs` (Apple's convention:
-///   a session ending Tuesday morning belongs to "Tuesday's sleep").
-///   Then push:
-///     - `sleep_need` = `(asleep + light + deep + rem)` total seconds
-///     - `deep_sleep_min` = deep stage minutes
-///     - `rem_sleep_min` = rem stage minutes
+/// - **Sleep stages** → minutes per category per night, each block
+///   attributed to the local date of its `endMs`:
+///     - `sleep.duration_s` = `(asleep + light + deep + rem)` in seconds
+///     - `sleep.deep_min` / `sleep.rem_min` = stage minutes
 ///
-/// - **HRV (SDNN)** → daily mean → `hrv_sdnn`. Apple Health publishes
-///   `HKQuantityTypeIdentifierHeartRateVariabilitySDNN` at 5-minute
-///   intervals from Apple Watch. The runtime SRM has a dedicated
-///   `hrv_sdnn` longitudinal dimension (mirroring `hrv_rmssd` window
-///   parameters); the engine bridge maps it to the live SRM key
-///   `hrv.sdnn_ms`. We do **not** push SDNN as `hrv_rmssd` because
-///   the two are not interchangeable — same heart, structurally
-///   different distributions.
+/// - **The main night** (asleep blocks merged across wakes shorter than
+///   90 minutes, filed under the date it ends on; the longest wins over
+///   a nap) → `sleep.midpoint_h`, its local midpoint, and
+///   `cardiac.overnight_hr_bpm`, the mean of the HR samples taken inside
+///   its asleep blocks. Both computed in-app.
+///
+/// - **HRV (SDNN)** → daily mean → `cardiac.overnight_sdnn_ms`. Never
+///   pushed as RMSSD: same heart, structurally different distributions.
 ///
 /// - **Steps / calories / spo2 / temperature** are still recorded by
-///   the FFI dedup index but not aggregated here — they have no live
-///   SRM dimension that they would feed.
+///   the FFI dedup index but not aggregated here.
 class AppleHealthDailyAggregator {
   // Day-index → vendor-computed daily resting HR running mean.
   // Populated from `HKQuantityTypeIdentifierRestingHeartRate`.
@@ -270,6 +261,28 @@ class AppleHealthDailyAggregator {
   final Map<int, _RunningMean> _sdnnByDay = {};
   // Day-index → sleep stage minutes (keyed by SleepStage.raw).
   final Map<int, Map<String, double>> _sleepByDay = {};
+  // Every asleep stage block, `(startMs, endMs)`, grouped into nights on
+  // replay: a night's stages straddle midnight, so per-day keys would split
+  // it. Gives the night's timing (`sleep.midpoint_h`) and which heart-rate
+  // samples were taken asleep (`cardiac.overnight_hr_bpm`).
+  final List<(int, int)> _asleepSpans = [];
+  // Five-minute bucket (`startMs ~/ _hrBucketMs`) → HR running mean. Kept
+  // in buckets because the export streams HR before or after the sleep
+  // records that say which samples were asleep.
+  final Map<int, _RunningMean> _hrByBucket = {};
+
+  static const _hrBucketMs = 5 * 60_000;
+  static const _asleepStages = {
+    SleepStage.asleep,
+    SleepStage.light,
+    SleepStage.deep,
+    SleepStage.rem,
+  };
+  // Blocks closer than this belong to one night (a wake-up in the night);
+  // further apart, a separate sleep (a nap).
+  static const _nightGapMs = 90 * 60_000;
+  // Fewer asleep HR samples than this is too thin for a nightly mean.
+  static const _minAsleepHrSamples = 6;
 
   bool get hasAnyEntries =>
       _restingHrByDay.isNotEmpty ||
@@ -293,6 +306,11 @@ class AppleHealthDailyAggregator {
         final v = s.value;
         if (v is! QuantityValue) return;
         final bpm = v.value;
+        // Asleep HR keeps its own, wider bounds: a sleeping heart below 40
+        // is real for a fit sleeper, where the resting proxy rejects it.
+        if (bpm >= 30.0 && bpm <= 150.0) {
+          (_hrByBucket[s.startMs ~/ _hrBucketMs] ??= _RunningMean()).add(bpm);
+        }
         if (bpm < 40.0 || bpm > 100.0) return;
         final day = localDayKey(s.startMs);
         (_hrProxyByDay[day] ??= _RunningMean()).add(bpm);
@@ -321,6 +339,9 @@ class AppleHealthDailyAggregator {
         final day = localDayKey(s.endMs);
         final stages = _sleepByDay[day] ??= <String, double>{};
         stages[v.stage.raw] = (stages[v.stage.raw] ?? 0.0) + minutes;
+        if (_asleepStages.contains(v.stage)) {
+          _asleepSpans.add((s.startMs, s.endMs));
+        }
         break;
       case AppleHealthMetric.hrvSdnn:
         final v = s.value;
@@ -396,6 +417,72 @@ class AppleHealthDailyAggregator {
       if (deep > 0) push(DailyMetric.sleepDeepMin, entry.key, deep);
       if (rem > 0) push(DailyMetric.sleepRemMin, entry.key, rem);
     }
+    // Both computed in-app from the stage timings, so neither is a vendor
+    // summary. Apple's resting HR is measured awake, so the asleep mean is a
+    // separate figure: it feeds only the Sleep Score's HR term.
+    for (final entry in _mainNightByWakeDay().entries) {
+      final night = entry.value;
+      push(
+        DailyMetric.sleepMidpointH,
+        entry.key,
+        _midpointHoursLocal(night.startMs, night.endMs),
+        summary: false,
+      );
+      final hr = _asleepMeanHr(night.spans);
+      if (hr != null) {
+        push(DailyMetric.overnightHrBpm, entry.key, hr, summary: false);
+      }
+    }
+  }
+
+  /// The main night per wake date: asleep blocks merged across short wakes,
+  /// filed under the local date the night ends on, the longest kept where a
+  /// date has more than one (a nap).
+  Map<int, _Night> _mainNightByWakeDay() {
+    final spans = [..._asleepSpans]..sort((a, b) => a.$1.compareTo(b.$1));
+    final nights = <_Night>[];
+    for (final span in spans) {
+      final last = nights.isEmpty ? null : nights.last;
+      if (last != null && span.$1 - last.endMs <= _nightGapMs) {
+        last.add(span);
+      } else {
+        nights.add(_Night(span));
+      }
+    }
+    final out = <int, _Night>{};
+    for (final night in nights) {
+      final day = localDayKey(night.endMs);
+      final held = out[day];
+      if (held == null || night.asleepMs > held.asleepMs) out[day] = night;
+    }
+    return out;
+  }
+
+  /// Mean heart rate over the five-minute buckets inside the asleep blocks,
+  /// weighted by sample count; null below [_minAsleepHrSamples].
+  double? _asleepMeanHr(List<(int, int)> spans) {
+    final buckets = <int>{};
+    for (final (start, end) in spans) {
+      for (var b = start ~/ _hrBucketMs; b <= (end - 1) ~/ _hrBucketMs; b++) {
+        buckets.add(b);
+      }
+    }
+    var sum = 0.0;
+    var n = 0;
+    for (final b in buckets) {
+      final m = _hrByBucket[b];
+      final mean = m?.mean;
+      if (m == null || mean == null) continue;
+      sum += mean * m.count;
+      n += m.count;
+    }
+    return n < _minAsleepHrSamples ? null : sum / n;
+  }
+
+  /// Local-time midpoint of a night in hours since midnight, `[0, 24)`.
+  static double _midpointHoursLocal(int startMs, int endMs) {
+    final mid = DateTime.fromMillisecondsSinceEpoch((startMs + endMs) ~/ 2);
+    return mid.hour + mid.minute / 60.0 + mid.second / 3600.0;
   }
 
   static const _provider = 'apple_health';
@@ -414,4 +501,22 @@ class _RunningMean {
   }
 
   double? get mean => _n == 0 ? null : _mean;
+
+  int get count => _n;
+}
+
+/// One night's asleep blocks, merged in start order.
+class _Night {
+  _Night((int, int) span) : startMs = span.$1, endMs = span.$2, spans = [span];
+
+  final int startMs;
+  int endMs;
+  final List<(int, int)> spans;
+
+  int get asleepMs => spans.fold(0, (total, s) => total + (s.$2 - s.$1));
+
+  void add((int, int) span) {
+    spans.add(span);
+    if (span.$2 > endMs) endMs = span.$2;
+  }
 }

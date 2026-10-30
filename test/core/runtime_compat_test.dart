@@ -26,16 +26,13 @@ void main() {
       expect(r.status, RuntimeCompatStatus.ok);
       expect(r.isAcceptable, isTrue);
     });
-    test('older between minimum and writtenAgainst, still acceptable', () {
-      final r = RuntimeCompat.check({'core_runtime': '0.42.0'});
-      expect(r.status, RuntimeCompatStatus.older);
-      expect(r.isAcceptable, isTrue);
-      expect(r.message, contains('0.42.0'));
-    });
     test('tooOld below minimum is refused', () {
-      final r = RuntimeCompat.check({'core_runtime': '0.41.0'});
-      expect(r.status, RuntimeCompatStatus.tooOld);
-      expect(r.isAcceptable, isFalse);
+      // 0.44.0 is the last ABI 4.1 release.
+      for (final v in ['0.43.0', '0.44.0']) {
+        final r = RuntimeCompat.check({'core_runtime': v});
+        expect(r.status, RuntimeCompatStatus.tooOld, reason: v);
+        expect(r.isAcceptable, isFalse, reason: v);
+      }
     });
     test('unknown when build_info has no version, still acceptable', () {
       expect(RuntimeCompat.check(null).status, RuntimeCompatStatus.unknown);
@@ -47,15 +44,25 @@ void main() {
     test('ok when the ABI matches and the version is current', () {
       final r = RuntimeCompat.check({
         'core_runtime': RuntimeCompat.writtenAgainst,
-        'abi': '4.0',
+        'abi': '4.2',
       });
       expect(r.status, RuntimeCompatStatus.ok);
-      expect(r.abi, '4.0');
+      expect(r.abi, '4.2');
     });
     test('a newer minor than required is compatible', () {
-      final r = RuntimeCompat.check({'core_runtime': '0.42.1', 'abi': '4.3'});
+      final r = RuntimeCompat.check({'core_runtime': '0.45.0', 'abi': '4.3'});
       expect(r.isAcceptable, isTrue);
     });
+    test(
+      'ABI 4.0 and 4.1 are refused: the daily score inputs changed in 4.2',
+      () {
+        for (final abi in ['4.0', '4.1']) {
+          final r = RuntimeCompat.check({'core_runtime': '0.43.0', 'abi': abi});
+          expect(r.status, RuntimeCompatStatus.incompatibleAbi, reason: abi);
+          expect(r.isAcceptable, isFalse, reason: abi);
+        }
+      },
+    );
     test('ABI 2.x and 3.x are refused: the pushes were re-signed in 4.0', () {
       for (final abi in ['2.1', '3.5']) {
         final r = RuntimeCompat.check({'core_runtime': '0.41.0', 'abi': abi});
@@ -85,16 +92,16 @@ void main() {
     });
     test('absent abi falls back to version checks', () {
       expect(
-        RuntimeCompat.check({'core_runtime': '0.41.0'}).status,
+        RuntimeCompat.check({'core_runtime': '0.43.0'}).status,
         RuntimeCompatStatus.tooOld,
       );
-      final older = RuntimeCompat.check({'core_runtime': '0.42.0'});
-      expect(older.status, RuntimeCompatStatus.older);
-      expect(older.abi, isNull);
+      final ok = RuntimeCompat.check({'core_runtime': '0.45.0'});
+      expect(ok.status, RuntimeCompatStatus.ok);
+      expect(ok.abi, isNull);
     });
     test('a malformed abi is treated as absent', () {
-      final r = RuntimeCompat.check({'core_runtime': '0.42.0', 'abi': 'x'});
-      expect(r.status, RuntimeCompatStatus.older);
+      final r = RuntimeCompat.check({'core_runtime': '0.45.0', 'abi': 'x'});
+      expect(r.status, RuntimeCompatStatus.ok);
       expect(r.abi, isNull);
     });
     test('tooOld message names both versions and the exact command', () {
@@ -120,7 +127,10 @@ void main() {
       expect(e.runtimeAbi, '2.1');
       expect(e.requiredAbi, RuntimeCompat.requiredAbi);
       expect(e.recommendedVersion, RuntimeCompat.writtenAgainst);
-      expect(e.installCommand, contains('--version 0.43.0'));
+      expect(
+        e.installCommand,
+        contains('--version ${RuntimeCompat.writtenAgainst}'),
+      );
       expect(e.toString(), contains('incompatible'));
     });
     test('a library without build info is an incompatible runtime', () {

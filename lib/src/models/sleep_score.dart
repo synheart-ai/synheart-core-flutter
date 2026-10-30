@@ -243,21 +243,97 @@ class NightRaw {
   };
 }
 
+/// One of the personal baselines' daily references: its value and the
+/// runtime's confidence in it, `0..1`.
+class DailyRef {
+  final double value;
+  final double confidence;
+
+  const DailyRef({required this.value, required this.confidence});
+
+  /// Null unless [json] is an object with numeric `value` and `confidence`.
+  static DailyRef? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final v = json['value'];
+    final c = json['confidence'];
+    if (v is! num || c is! num) return null;
+    return DailyRef(value: v.toDouble(), confidence: c.toDouble());
+  }
+
+  Map<String, Object?> toJson() => {'value': value, 'confidence': confidence};
+}
+
+/// The personal baselines the Sleep Score reads, from
+/// [Synheart.dailySleepBaselines]. A reference is null until the baselines
+/// hold enough nights for it; which ones exist sets the score's mode.
+class SleepBaselines {
+  /// Typical sleep midpoint, local hour of day `0..24` (`sleep.midpoint_h`).
+  final DailyRef? midpointH;
+
+  /// Typical whole-night mean heart rate, bpm (`cardiac.overnight_hr_bpm`).
+  final DailyRef? overnightHrBpm;
+
+  /// Typical nightly deep-sleep minutes (`sleep.deep_min`).
+  final DailyRef? deepMin;
+
+  /// Typical nightly REM minutes (`sleep.rem_min`).
+  final DailyRef? remMin;
+
+  const SleepBaselines({
+    this.midpointH,
+    this.overnightHrBpm,
+    this.deepMin,
+    this.remMin,
+  });
+
+  static SleepBaselines fromJson(Map<String, dynamic> json) => SleepBaselines(
+    midpointH: DailyRef.fromJson(json['midpoint_h']),
+    overnightHrBpm: DailyRef.fromJson(json['overnight_hr_bpm']),
+    deepMin: DailyRef.fromJson(json['deep_min']),
+    remMin: DailyRef.fromJson(json['rem_min']),
+  );
+
+  Map<String, Object?> toJson() => {
+    'midpoint_h': midpointH?.toJson(),
+    'overnight_hr_bpm': overnightHrBpm?.toJson(),
+    'deep_min': deepMin?.toJson(),
+    'rem_min': remMin?.toJson(),
+  };
+}
+
 /// Full input to the scorer.
 class SleepScoreInput {
   final NightRaw tonight;
+
+  /// Prior nights, newest first. Only the two newest are read, for the
+  /// sleep-debt chain; the personal baselines come from [baselines].
   final List<NightRaw> priorsNewestFirst;
+
+  /// Tonight's sleep midpoint, local hour of day `0..24`: the value pushed as
+  /// `sleep.midpoint_h`. Null when the night has no start and end time, which
+  /// leaves consistency out of the score; never derive it from totals.
+  final double? tonightMidpointH;
+
+  /// The personal baselines as of tonight, from
+  /// [Synheart.dailySleepBaselines]. Without them the score stays in its
+  /// cold-start mode.
+  final SleepBaselines? baselines;
+
   final String pipelineVersion;
 
   const SleepScoreInput({
     required this.tonight,
     this.priorsNewestFirst = const [],
+    this.tonightMidpointH,
+    this.baselines,
     this.pipelineVersion = '',
   });
 
   Map<String, Object?> toJson() => {
     'tonight': tonight.toJson(),
     'priors_newest_first': priorsNewestFirst.map((p) => p.toJson()).toList(),
+    'tonight_midpoint_h': tonightMidpointH,
+    if (baselines != null) 'baselines': baselines!.toJson(),
     'pipeline_version': pipelineVersion,
   };
 

@@ -1236,6 +1236,8 @@ class CoreRuntimeBridge {
     'srmSetDayType': _ffi.srmSetDayType != null,
     'exportBaselineSnapshot': _ffi.exportBaselineSnapshot != null,
     'loadBaselineSnapshot': _ffi.loadBaselineSnapshot != null,
+    'dailyBaselineRefsJson': _ffi.dailyBaselineRefsJson != null,
+    'dailySleepBaselinesJson': _ffi.dailySleepBaselinesJson != null,
     'attachRecoveryScoreJson': _ffi.attachRecoveryScoreJson != null,
     'attachReadinessScoreJson': _ffi.attachReadinessScoreJson != null,
   };
@@ -2726,6 +2728,25 @@ class CoreRuntimeBridge {
     if (fn == null) return null;
     final rc = fn(_handle, tsMs);
     return _checked(rc, failed: rc != 0);
+  }
+
+  /// The Recovery Score's `baselines` object as JSON
+  /// (`hrv_rmssd_ms`, `hrv_confidence`, `resting_hr_bpm`, `rhr_confidence`),
+  /// or null until overnight RMSSD and resting HR both have a reference, or
+  /// when the runtime predates C ABI 4.2.
+  String? dailyBaselineRefsJson() {
+    final fn = _ffi.dailyBaselineRefsJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
+  }
+
+  /// The Sleep Score's `baselines` object as JSON (`midpoint_h`,
+  /// `overnight_hr_bpm`, `deep_min`, `rem_min`, each `{value, confidence}` or
+  /// null), or null without a pipeline or before C ABI 4.2.
+  String? dailySleepBaselinesJson() {
+    final fn = _ffi.dailySleepBaselinesJson;
+    if (fn == null) return null;
+    return _readOrNote(fn(_handle));
   }
 
   /// What the personal baselines know, as JSON. Device-only.

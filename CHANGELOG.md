@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
+load. The daily score inputs changed shape with ABI 4.2 and neither shape
+parses on the other runtime, so there is no fallback.
+
+### Migrating
+
+- **`ReadinessScoreInput.baselineDays` is now `baselineMaturity`** (`0..1`):
+  the lower of the two confidences in `Synheart.dailyBaselineRefs()`
+  (`BaselineRefs.maturity`), or `0` when it returns null.
+- **`SleepScoreInput` gains `tonightMidpointH` and `baselines`.** Pass the
+  night's local sleep midpoint (null when the source gives no start and end
+  time) and `Synheart.dailySleepBaselines()`; without the baselines the score
+  stays in its cold-start mode. Only the two newest `priorsNewestFirst` nights
+  are read now, for sleep debt.
+- **`RecoveryScoreInput.baselines`**: take them from
+  `Synheart.dailyBaselineRefs()` rather than building them from
+  `wearableReference`.
+
+### Added
+
+- `Synheart.dailyBaselineRefs()` and `Synheart.dailySleepBaselines()`: the
+  daily scores' personal baselines, read after
+  `srmRefreshWearableReference()`. `SleepBaselines`, `DailyRef`,
+  `BaselineRefs.fromJson` and `BaselineRefs.maturity`.
+- `DailyMetric.overnightHrBpm` (`cardiac.overnight_hr_bpm`, the Sleep Score's
+  heart-rate baseline), `DailyMetric.activeMin` (`motion.active_min`, pushed
+  once the day is over) and `DailyMetric.restRmssdMs`
+  (`cardiac.rest_rmssd_ms`, written by the engine; do not push it).
+
+### Changed
+
+- `Baselines` scores each night against the runtime's baselines: Sleep reads
+  `dailySleepBaselines()` with the night's midpoint, Recovery and Readiness read
+  `dailyBaselineRefs()`.
+- The nightly push adds `sleep.midpoint_h` (only for a night with a start and
+  end time) and `cardiac.overnight_hr_bpm`. The one overnight heart-rate
+  figure is pushed as both `cardiac.overnight_hr_bpm` and
+  `cardiac.resting_hr_bpm`, so Recovery and Readiness keep a resting-HR
+  baseline.
+- `HealthConnectRuntimeSink` pushes each night's asleep mean HR as
+  `cardiac.overnight_hr_bpm` and its `sleep.midpoint_h` from the recorded
+  asleep span, and `cardiac.resting_hr_bpm` from Health Connect's resting-HR
+  record, the asleep mean standing in without one. It pushed the day's HR
+  median as resting HR: a daytime figure. It also pushes `motion.active_min`
+  (Health Connect exercise sessions) for each day that is over. Needs
+  synheart_wear with `overnightHrBpm` and `fetchActiveMinutes`.
+- `HealthConnectBackfillResult.dimensionsPushed` and `daysIngested` count only
+  values the runtime accepted. They counted every attempt, so an import with no
+  session running reported values it never stored.
+- `AppleHealthDailyAggregator` groups asleep stage blocks into the main night
+  and pushes its `sleep.midpoint_h` and `cardiac.overnight_hr_bpm` (the mean HR
+  inside the asleep blocks). Apple's resting HR still goes only to
+  `cardiac.resting_hr_bpm`.
+
 ## [0.21.0] - 2026-10-27
 
 Recommends runtime 0.43.0 (C ABI 4.1): `synheart install runtime --version 0.43.0`.
