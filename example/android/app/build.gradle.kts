@@ -48,3 +48,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // WatchSampleBridge: the raw samples a paired Wear OS watch streams.
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
+}

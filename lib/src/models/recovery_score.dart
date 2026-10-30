@@ -153,6 +153,30 @@ class BaselineRefs {
     required this.rhrConfidence,
   });
 
+  /// Null unless [json] carries all four fields as numbers.
+  static BaselineRefs? fromJson(Map<String, dynamic> json) {
+    final hrv = json['hrv_rmssd_ms'];
+    final hrvConf = json['hrv_confidence'];
+    final rhr = json['resting_hr_bpm'];
+    final rhrConf = json['rhr_confidence'];
+    if (hrv is! num || hrvConf is! num || rhr is! num || rhrConf is! num) {
+      return null;
+    }
+    return BaselineRefs(
+      hrvRmssdMs: hrv.toDouble(),
+      hrvConfidence: hrvConf.toDouble(),
+      restingHrBpm: rhr.toDouble(),
+      rhrConfidence: rhrConf.toDouble(),
+    );
+  }
+
+  /// Maturity of the overnight HR/HRV baselines, `0..1`: the lower of the two
+  /// confidences. Readiness reads it as its `baseline_maturity`.
+  double get maturity {
+    final m = hrvConfidence < rhrConfidence ? hrvConfidence : rhrConfidence;
+    return m.isFinite ? m.clamp(0.0, 1.0) : 0.0;
+  }
+
   Map<String, Object?> toJson() => {
     'hrv_rmssd_ms': hrvRmssdMs,
     'hrv_confidence': hrvConfidence,

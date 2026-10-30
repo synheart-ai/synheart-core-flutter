@@ -110,6 +110,8 @@ class DiagnosticsScreen extends StatelessWidget {
 
           _NativeErrorCard(controller: c),
 
+          _DailyScoresCard(controller: c),
+
           SectionCard(
             title: 'Local data',
             subtitle:
@@ -210,6 +212,164 @@ class _NativeErrorCard extends StatelessWidget {
             icon: const Icon(Icons.bug_report_outlined),
             label: const Text('Probe: stop a session that is not running'),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The daily scores and the baselines they read (C ABI 4.2).
+///
+/// This example holds no health permission, so the one honest input it has
+/// is a night the person reports: bedtime and wake time. That is enough for a
+/// Sleep Score and for the duration and midpoint baselines. The Recovery and
+/// Readiness refs stay null without a heart-rate source.
+class _DailyScoresCard extends StatefulWidget {
+  const _DailyScoresCard({required this.controller});
+
+  final SynheartController controller;
+
+  @override
+  State<_DailyScoresCard> createState() => _DailyScoresCardState();
+}
+
+class _DailyScoresCardState extends State<_DailyScoresCard> {
+  TimeOfDay _bed = const TimeOfDay(hour: 23, minute: 0);
+  TimeOfDay _wake = const TimeOfDay(hour: 7, minute: 0);
+  bool _busy = false;
+
+  Future<void> _pick(bool bed) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: bed ? _bed : _wake,
+    );
+    if (t != null) setState(() => bed ? _bed = t : _wake = t);
+  }
+
+  Future<void> _log() async {
+    final now = DateTime.now();
+    final wake = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      _wake.hour,
+      _wake.minute,
+    );
+    var bed = DateTime(now.year, now.month, now.day, _bed.hour, _bed.minute);
+    // A bedtime later in the day than the wake time was last night.
+    if (!bed.isBefore(wake)) bed = bed.subtract(const Duration(days: 1));
+    setState(() => _busy = true);
+    try {
+      await widget.controller.logSelfReportedSleep(
+        bedtime: bed,
+        wakeTime: wake,
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _import() async {
+    setState(() => _busy = true);
+    try {
+      await widget.controller.importHealthConnect();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    final score = c.lastSleepScore;
+    final sleep = c.sleepBaselines;
+    final refs = c.baselineRefs;
+    return SectionCard(
+      title: 'Daily scores',
+      subtitle:
+          'Report last night to score it. Baselines show value @ confidence; '
+          '— is withheld.',
+      trailing: StatusPill(
+        score?.score == null ? 'no score' : 'sleep ${score!.score}',
+        tone: score?.score == null ? PillTone.neutral : PillTone.good,
+      ),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _pick(true),
+                child: Text('Bed ${_bed.format(context)}'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _pick(false),
+                child: Text('Wake ${_wake.format(context)}'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _busy ? null : _log,
+            icon: const Icon(Icons.bedtime_outlined),
+            label: const Text('Log last night'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _busy ? null : _import,
+            icon: const Icon(Icons.watch_outlined),
+            label: const Text('Import Health Connect (30 days)'),
+          ),
+        ),
+        if (c.lastHealthImport case final r?)
+          KeyValueRow(
+            'last import',
+            r.skipped
+                ? 'skipped: ${r.skipReason}'
+                : '${r.daysIngested} days, ${r.dimensionsPushed} values',
+          ),
+        const SizedBox(height: 12),
+        if (score != null) ...[
+          KeyValueRow('sleep score', '${score.score ?? '—'}'),
+          KeyValueRow('mode', score.mode.wire),
+          KeyValueRow('confidence', score.confidence.toStringAsFixed(2)),
+          KeyValueRow('pipeline', score.pipelineVersion, selectable: true),
+          KeyValueRow(
+            'explanation',
+            score.explanation.map((f) => f.name).join(', '),
+          ),
+        ],
+        KeyValueRow(
+          'midpoint baseline',
+          SynheartController.describeRef(sleep?.midpointH),
+        ),
+        KeyValueRow(
+          'overnight HR baseline',
+          SynheartController.describeRef(sleep?.overnightHrBpm),
+        ),
+        KeyValueRow(
+          'deep baseline',
+          SynheartController.describeRef(sleep?.deepMin),
+        ),
+        KeyValueRow(
+          'REM baseline',
+          SynheartController.describeRef(sleep?.remMin),
+        ),
+        KeyValueRow(
+          'recovery refs',
+          refs == null
+              ? '— (needs RMSSD + resting HR)'
+              : 'hrv ${refs.hrvRmssdMs.toStringAsFixed(1)}, '
+                    'rhr ${refs.restingHrBpm.toStringAsFixed(1)}, '
+                    'maturity ${refs.maturity.toStringAsFixed(2)}',
         ),
       ],
     );

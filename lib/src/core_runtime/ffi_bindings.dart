@@ -1307,6 +1307,20 @@ class SynheartCoreFFI {
       'synheart_core_baseline_begin_rest_block',
     ),
   );
+  // C ABI 4.2: the daily scores' baselines, read after
+  // `srm_refresh_wearable_reference`.
+  late final dailyBaselineRefsJson = _optional(
+    'synheart_core_daily_baseline_refs_json',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_daily_baseline_refs_json',
+    ),
+  );
+  late final dailySleepBaselinesJson = _optional(
+    'synheart_core_daily_sleep_baselines_json',
+    () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(
+      'synheart_core_daily_sleep_baselines_json',
+    ),
+  );
   late final baselineProfileJson = _optional(
     'synheart_core_baseline_profile_json',
     () => _lib.lookupFunction<_JsonReturnC, _JsonReturnDart>(

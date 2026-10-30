@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:synheart_core/synheart_core.dart';
 
 /// Pins the readiness models to the engine's `synheart_readiness_score`
-/// shapes (engine v0.12.0 onwards). The SDK's model drifted from the engine
+/// shapes (engine v0.12.0 onwards; `baseline_maturity` from C ABI 4.2). The SDK's model drifted from the engine
 /// once and every readiness compute failed with `missing field sleep_score`
 /// for months; these keys are the contract.
 void main() {
@@ -15,7 +15,7 @@ void main() {
         sleepScore: 42,
         recoveryColdStart: true,
         sleepColdStart: true,
-        baselineDays: 1,
+        baselineMaturity: 0.4,
       ).toJson();
       expect(json.keys.toSet(), {
         'recovery_score',
@@ -23,13 +23,15 @@ void main() {
         'alignment',
         'recovery_cold_start',
         'sleep_cold_start',
-        'baseline_days',
+        'baseline_maturity',
       });
       expect(json['recovery_score'], 46);
       expect(json['sleep_score'], 42);
       expect(json['alignment'], isNull);
       expect(json['recovery_cold_start'], isTrue);
-      expect(json['baseline_days'], 1);
+      expect(json['baseline_maturity'], 0.4);
+      // The ABI 4.2 engine refuses an input that still carries baseline_days.
+      expect(json.containsKey('baseline_days'), isFalse);
     });
 
     test('alignment carries all four values', () {
@@ -55,11 +57,22 @@ void main() {
       final json = const ReadinessScoreInput(
         recoveryScore: 140,
         sleepScore: -3,
-        baselineDays: -1,
+        baselineMaturity: 1.7,
       ).toJson();
       expect(json['recovery_score'], 100);
       expect(json['sleep_score'], 0);
-      expect(json['baseline_days'], 0);
+      expect(json['baseline_maturity'], 1.0);
+    });
+
+    test('baseline maturity defaults to 0 and drops a non-finite value', () {
+      const base = ReadinessScoreInput(recoveryScore: 50, sleepScore: 50);
+      expect(base.toJson()['baseline_maturity'], 0.0);
+      final nan = const ReadinessScoreInput(
+        recoveryScore: 50,
+        sleepScore: 50,
+        baselineMaturity: double.nan,
+      ).toJson();
+      expect(nan['baseline_maturity'], 0.0);
     });
   });
 

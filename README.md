@@ -123,8 +123,9 @@ synheart install runtime
 synheart install syni     # required on iOS, see below
 ```
 
-`synheart_core` requires runtime ABI 4.x, which is runtime 0.42.0 or newer
-(`RuntimeCompat.requiredAbi`); older runtimes are refused at load. The
+`synheart_core` requires runtime ABI 4.2 or a later 4.x, which is runtime
+0.45.0 or newer (`RuntimeCompat.requiredAbi`); older runtimes are refused at
+load. The
 requirement is also published in the package as `synheart_runtime.json`, which
 the CLI reads to validate a project. If the runtime is missing or does not fit,
 the SDK reports a `SynheartRuntimeException`; see

@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kDebugMode;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode;
+import 'package:flutter/services.dart' show EventChannel;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synheart_core/synheart_core.dart';
+import 'package:synheart_wear/synheart_wear.dart'
+    show HealthAdapter, PermissionType;
 
 import 'mobile_host_runner.dart';
 import 'sync_runner.dart';
@@ -689,6 +693,74 @@ class SynheartController extends ChangeNotifier {
       s.hrvRmssd != null ||
       (s.rrIntervals?.isNotEmpty ?? false);
 
+  // ── Watch companion ────────────────────────────────────────────────────
+  //
+  // A Wear OS watch app in STREAM mode sends each raw sample to the phone:
+  // bpm, the beat-to-beat intervals when the watch detects beats, and the
+  // sample time. `WatchSampleBridge` (Android) hands their JSON here and this
+  // pushes them into the runtime — HR as `sdk_wear`, RR as `watch_sample`
+  // (Tier-2, a watch's beat detection; never `ble_hrm`, which claims a chest
+  // strap's fidelity). Real samples from the person's own watch, so they move
+  // the live axes and the personal baselines like any wearable's.
+
+  static const _watchChannel = EventChannel(
+    'ai.synheart.core.example/watch_samples',
+  );
+  StreamSubscription<dynamic>? _watchSub;
+  int watchHrCount = 0;
+  int watchRrCount = 0;
+  double? lastWatchBpm;
+  DateTime? lastWatchSampleAt;
+
+  bool get isWatchListening => _watchSub != null;
+
+  void startWatchListening() {
+    if (_watchSub != null) return;
+    _watchSub = _watchChannel.receiveBroadcastStream().listen((raw) {
+      final Map<String, dynamic> m;
+      try {
+        m = jsonDecode(raw as String) as Map<String, dynamic>;
+      } catch (_) {
+        return;
+      }
+      final ts = (m['timestamp_ms'] as num?)?.toInt();
+      final bpm = (m['bpm'] as num?)?.toDouble();
+      if (ts == null) return;
+      // The runtime refuses samples without a running pipeline; count only
+      // what was pushed into one.
+      if (!_isSessionRunning) return;
+      if (bpm != null && bpm > 0) {
+        Synheart.pushWearHr(ts, bpm);
+        watchHrCount++;
+        lastWatchBpm = bpm;
+      }
+      final rr = (m['rr_intervals_ms'] as List?)
+          ?.whereType<num>()
+          .map((v) => v.toDouble())
+          .where((v) => v > 0)
+          .toList();
+      if (rr != null && rr.isNotEmpty) {
+        Synheart.pushRrBatch(ts, rr, provider: 'watch_sample');
+        watchRrCount += rr.length;
+      }
+      lastWatchSampleAt = DateTime.now();
+      if (watchHrCount % 10 == 1) {
+        debugPrint(
+          '[Example] watch sample: bpm=$bpm rr=${rr ?? '-'} '
+          '(hr=$watchHrCount rr=$watchRrCount)',
+        );
+      }
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  void stopWatchListening() {
+    _watchSub?.cancel();
+    _watchSub = null;
+    notifyListeners();
+  }
+
   // ── Behavior signal ────────────────────────────────────────────────────
   //
   // Taps, scrolls and swipes need no sensor, so behavior is the one source
@@ -771,6 +843,73 @@ class SynheartController extends ChangeNotifier {
 
   /// SDK version constant, kept in sync with pubspec.
   String get sdkVersion => synheartCoreVersion;
+
+  // ── Daily scores ───────────────────────────────────────────────────────
+
+  /// The Sleep Score from the last self-reported night, or null.
+  SleepScoreResult? lastSleepScore;
+
+  /// Score a night the person reports themselves. It is real input, not
+  /// simulated: its duration and midpoint go to the personal baselines like
+  /// any other source's. There is no heart rate in it, so Recovery and
+  /// Readiness stay out until a wearable or health source supplies one.
+  Future<SleepScoreResult?> logSelfReportedSleep({
+    required DateTime bedtime,
+    required DateTime wakeTime,
+  }) async {
+    lastSleepScore = await Baselines.ingestSelfReportedSleep(
+      SleepQuestionnaireAnswers(bedtime: bedtime, wakeTime: wakeTime),
+    );
+    notifyListeners();
+    return lastSleepScore;
+  }
+
+  /// The outcome of the last Health Connect import, or null.
+  HealthConnectBackfillResult? lastHealthImport;
+
+  /// Pull the person's Health Connect history (sleep, overnight HR and RMSSD
+  /// from a paired watch) into the personal baselines. Real recorded data,
+  /// read with the person's permission; Android only.
+  Future<HealthConnectBackfillResult?> importHealthConnect({
+    int daysBack = 30,
+  }) async {
+    final granted = await HealthAdapter.requestPermissions({
+      PermissionType.heartRate,
+      PermissionType.heartRateVariability,
+      PermissionType.steps,
+      PermissionType.sleep,
+      PermissionType.exercise,
+    });
+    if (!granted) {
+      debugPrint('[Example] Health Connect permission not granted');
+    }
+    lastHealthImport = await HealthConnectRuntimeSink().backfill(
+      daysBack: daysBack,
+    );
+    final r = lastHealthImport!;
+    debugPrint(
+      '[Example] Health Connect import: days=${r.daysIngested} '
+      'pushed=${r.dimensionsPushed} skipped=${r.skipped} '
+      '${r.skipReason ?? ''} in ${r.durationMs} ms; '
+      'refs=${baselineRefs?.toJson()} sleep=${sleepBaselines?.toJson()}',
+    );
+    notifyListeners();
+    return lastHealthImport;
+  }
+
+  /// The Sleep Score's baselines as the runtime holds them (C ABI 4.2). Null
+  /// on an older runtime or before any night has been pushed.
+  SleepBaselines? get sleepBaselines => Synheart.dailySleepBaselines();
+
+  /// A daily baseline as `value @ confidence`, or `—` when withheld.
+  static String describeRef(DailyRef? r) => r == null
+      ? '—'
+      : '${r.value.toStringAsFixed(1)} @ ${r.confidence.toStringAsFixed(2)}';
+
+  /// The Recovery and Readiness baselines (C ABI 4.2): null until overnight
+  /// RMSSD and resting HR both have a reference, which a self-reported night
+  /// never supplies.
+  BaselineRefs? get baselineRefs => Synheart.dailyBaselineRefs();
 
   // ── Device attestation ─────────────────────────────────────────────────
   //

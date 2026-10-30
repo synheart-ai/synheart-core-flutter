@@ -398,6 +398,106 @@ void main() {
       expect(agg.distinctDayCount, 3); // {100, 101, 102}
     });
 
+    group('main night', () {
+      wear.AppleHealthSample block(
+        int startMs,
+        int endMs, [
+        wear.SleepStage stage = wear.SleepStage.light,
+      ]) => wear.AppleHealthSample(
+        metric: wear.AppleHealthMetric.sleepStage,
+        source: 'Apple Watch',
+        startMs: startMs,
+        endMs: endMs,
+        value: wear.SleepStageValue(stage),
+      );
+
+      wear.AppleHealthSample hrAt(int ms, double bpm) => wear.AppleHealthSample(
+        metric: wear.AppleHealthMetric.heartRate,
+        source: 'Apple Watch',
+        startMs: ms,
+        endMs: ms,
+        value: wear.QuantityValue(bpm),
+      );
+
+      // 23:00 day 199 → 07:00 day 200, awake 05:00–05:30.
+      void addNight() {
+        agg.add(block(_localMs(199, 23), _localMs(200, 3)));
+        agg.add(
+          block(_localMs(200, 3), _localMs(200, 5), wear.SleepStage.deep),
+        );
+        agg.add(
+          block(_localMs(200, 5), _localMs(200, 5, 30), wear.SleepStage.awake),
+        );
+        agg.add(
+          block(_localMs(200, 5, 30), _localMs(200, 7), wear.SleepStage.rem),
+        );
+      }
+
+      _Pushed only(String metric) => pushed.singleWhere((p) => p.dim == metric);
+
+      test('pushes the midpoint and the asleep mean HR on the wake day', () {
+        addNight();
+        for (final (h, m, bpm) in [
+          (23, 30, 50.0),
+          (1, 0, 52.0),
+          (2, 0, 48.0),
+          (4, 0, 54.0),
+          (6, 0, 56.0),
+          (6, 30, 46.0),
+        ]) {
+          agg.add(hrAt(_localMs(h == 23 ? 199 : 200, h, m), bpm));
+        }
+        // Awake in the night and in the day: not asleep HR.
+        agg.add(hrAt(_localMs(200, 5, 10), 90));
+        agg.add(hrAt(_localMs(200, 12), 80));
+        agg.replayInto(capture);
+
+        final mid = only(DailyMetric.sleepMidpointH);
+        expect(mid.day, 200);
+        expect(mid.value, closeTo(3.0, 1e-9));
+        expect(mid.vendorSummary, isFalse);
+        final hr = only(DailyMetric.overnightHrBpm);
+        expect(hr.day, 200);
+        expect(hr.value, closeTo(51.0, 1e-9));
+        expect(hr.vendorSummary, isFalse);
+      });
+
+      test('a nap on the wake day does not replace the night', () {
+        addNight();
+        agg.add(block(_localMs(200, 14), _localMs(200, 14, 40)));
+        agg.replayInto(capture);
+        expect(only(DailyMetric.sleepMidpointH).value, closeTo(3.0, 1e-9));
+      });
+
+      test('asleep HR below the resting-proxy floor still counts', () {
+        addNight();
+        for (final h in [0, 1, 2, 3, 4, 6]) {
+          agg.add(hrAt(_localMs(200, h, 15), 38));
+        }
+        agg.replayInto(capture);
+        expect(only(DailyMetric.overnightHrBpm).value, closeTo(38.0, 1e-9));
+        // The proxy keeps its own [40, 100] filter.
+        expect(pushed.where((p) => p.dim == DailyMetric.restingHrBpm), isEmpty);
+      });
+
+      test('too few asleep HR samples push no overnight HR', () {
+        addNight();
+        agg.add(hrAt(_localMs(200, 1), 52));
+        agg.replayInto(capture);
+        expect(
+          pushed.where((p) => p.dim == DailyMetric.overnightHrBpm),
+          isEmpty,
+        );
+        expect(only(DailyMetric.sleepMidpointH).day, 200);
+      });
+
+      test('HR without any sleep pushes no midpoint or overnight HR', () {
+        agg.add(hr(100, 60));
+        agg.replayInto(capture);
+        expect(pushed.map((p) => p.dim).toSet(), {DailyMetric.restingHrBpm});
+      });
+    });
+
     test('30-day backfill produces 30 resting_hr pushes', () {
       // The user's actual scenario: Apple Health export with HR
       // samples spanning 30 days. Each day's filtered mean lands as

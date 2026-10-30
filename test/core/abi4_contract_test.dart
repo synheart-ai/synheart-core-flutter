@@ -31,13 +31,15 @@ void main() {
   });
 
   group('DailyMetric', () {
-    test('names exactly the twelve metrics runtime 0.42 accepts', () {
+    test('names exactly the fifteen metrics C ABI 4.2 accepts', () {
       // The runtime refuses any other name with 1004, including the names
       // these replaced, so this set is the contract.
       expect(DailyMetric.all, {
         'sleep.duration_s',
         'sleep.midpoint_h',
         'cardiac.overnight_rmssd_ms',
+        'cardiac.rest_rmssd_ms',
+        'cardiac.overnight_hr_bpm',
         'cardiac.overnight_sdnn_ms',
         'cardiac.resting_hr_bpm',
         'vendor.recovery_frac',
@@ -45,6 +47,7 @@ void main() {
         'sleep.rem_min',
         'vendor.strain_frac',
         'motion.steps_count',
+        'motion.active_min',
         'cardiac.hrr_load_au',
         'cardiac.overnight_hr_sd_bpm',
       });

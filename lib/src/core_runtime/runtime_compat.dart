@@ -15,22 +15,26 @@ class RuntimeCompat {
   /// release every install hint recommends. Bump it when the bindings adopt a
   /// new symbol or a moved shape, or once they are verified on a newer
   /// release.
-  static const String writtenAgainst = '0.43.0';
+  static const String writtenAgainst = '0.45.0';
 
   /// Oldest runtime the bindings are known to load and behave on. Below this
   /// the SDK refuses to initialise rather than run with entrypoints that no
-  /// longer mean what the code assumes. `0.42.0` is the first release on C
-  /// ABI 4.0, which these bindings require.
-  static const String minimum = '0.42.0';
+  /// longer mean what the code assumes. `0.45.0` is the first release on C
+  /// ABI 4.2, which these bindings require.
+  static const String minimum = '0.45.0';
 
   /// The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
   /// any removal, rename or signature change and MINOR on additions only, so a
   /// runtime is compatible when its MAJOR equals [requiredAbiMajor] and its
   /// MINOR is at least [requiredAbiMinor]. This, not the release version, is
   /// the contract; the version checks only grade runtimes that satisfy it.
-  static const String requiredAbi = '4.0';
+  ///
+  /// 4.2 because the daily score inputs changed shape with it
+  /// (`baseline_maturity`, the Sleep Score's `baselines`): neither shape
+  /// parses on the other runtime, so there is no fallback to an older one.
+  static const String requiredAbi = '4.2';
   static const int requiredAbiMajor = 4;
-  static const int requiredAbiMinor = 0;
+  static const int requiredAbiMinor = 2;
 
   /// Newest ABI major the bindings also accept. Only 4: ABI 4.0 re-signed every
   /// sample push (each now takes `provider` and `utc_offset_min`) and the

@@ -3968,6 +3968,40 @@ class Synheart {
         nowMs ?? DateTime.now().millisecondsSinceEpoch,
       );
 
+  /// The Recovery Score's personal baselines: overnight RMSSD and resting
+  /// HR with the runtime's confidence in each. Read it after
+  /// [srmRefreshWearableReference]. Null until both have a reference; pass
+  /// null on [RecoveryScoreInput.baselines] then. Its [BaselineRefs.maturity]
+  /// is the Readiness input's `baselineMaturity`.
+  static BaselineRefs? dailyBaselineRefs() {
+    final json = _coreRuntime?.dailyBaselineRefsJson();
+    if (json == null || json.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(json);
+      return decoded is Map<String, dynamic>
+          ? BaselineRefs.fromJson(decoded)
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The Sleep Score's personal baselines (midpoint, overnight HR, deep and
+  /// REM minutes). Read it after [srmRefreshWearableReference] and pass it on
+  /// [SleepScoreInput.baselines]; without it the score stays in cold start.
+  static SleepBaselines? dailySleepBaselines() {
+    final json = _coreRuntime?.dailySleepBaselinesJson();
+    if (json == null || json.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(json);
+      return decoded is Map<String, dynamic>
+          ? SleepBaselines.fromJson(decoded)
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// What the personal baselines know, as JSON. Device-only.
   static String? baselineProfileJson() => _coreRuntime?.baselineProfileJson();
 

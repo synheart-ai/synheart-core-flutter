@@ -101,6 +101,8 @@ class SessionScreen extends StatelessWidget {
             ],
           ),
 
+          _WatchCard(controller: c),
+
           SectionCard(
             title: 'Live HSI',
             subtitle:
@@ -1057,6 +1059,72 @@ class _AxisCoverageBlock extends StatelessWidget {
           'it and declined to publish, and the reason is printed verbatim.',
           style: muted,
         ),
+      ],
+    );
+  }
+}
+
+/// Live heart rate from a paired Wear OS watch running the watch app in
+/// STREAM mode. Start a session on the watch; samples reach the runtime only
+/// while a phone session is running.
+class _WatchCard extends StatelessWidget {
+  const _WatchCard({required this.controller});
+
+  final SynheartController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final at = c.lastWatchSampleAt;
+    final age = at == null ? null : DateTime.now().difference(at).inSeconds;
+    final live = age != null && age < 10;
+    return SectionCard(
+      title: 'Watch',
+      subtitle: c.isWatchListening
+          ? 'Listening. Start a session on the watch; its samples feed this '
+                'session.'
+          : 'Receive heart rate (and beat intervals, when the watch detects '
+                'them) from the paired Wear OS watch app.',
+      trailing: StatusPill(
+        !c.isWatchListening
+            ? 'off'
+            : live
+            ? 'live'
+            : 'waiting',
+        tone: live ? PillTone.good : PillTone.neutral,
+      ),
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: c.isWatchListening
+              ? OutlinedButton.icon(
+                  onPressed: c.stopWatchListening,
+                  icon: const Icon(Icons.watch_off_outlined),
+                  label: const Text('Stop receiving'),
+                )
+              : FilledButton.icon(
+                  onPressed: c.startWatchListening,
+                  icon: const Icon(Icons.watch_outlined),
+                  label: const Text('Receive from watch'),
+                ),
+        ),
+        if (c.isWatchListening) ...[
+          const SizedBox(height: 12),
+          KeyValueRow(
+            'heart rate',
+            c.lastWatchBpm == null
+                ? '—'
+                : '${c.lastWatchBpm!.toStringAsFixed(0)} bpm',
+          ),
+          KeyValueRow('HR samples pushed', '${c.watchHrCount}'),
+          KeyValueRow(
+            'beat intervals pushed',
+            c.watchRrCount == 0
+                ? '0 (watch sends no beats)'
+                : '${c.watchRrCount}',
+          ),
+          KeyValueRow('last sample', age == null ? '—' : '${age}s ago'),
+        ],
       ],
     );
   }
