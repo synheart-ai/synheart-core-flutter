@@ -106,25 +106,51 @@ Health Connect permissions are declared in
 the wear module read heart rate. With no wearable paired, Health Connect has no
 data to give and the app says so rather than inventing values.
 
+The Runtime tab's **Import Health Connect** reads 30 days of history (sleep,
+overnight heart rate, HRV, exercise) into the personal baselines. It needs a
+running session: the runtime refuses daily values without one, and the import
+counts only what it accepted. What it finds depends on what the person's apps
+share with Health Connect — Samsung Health, for one, shares no HRV or resting
+heart rate.
+
+### Wear OS watch
+
+The Session tab's **Watch** card takes live heart rate from a paired Wear OS
+watch app running in STREAM mode, such as the Synheart Wear OS reference app.
+`WatchSampleBridge.kt` listens for its raw samples on the Wearable Data Layer
+(`/synheart/session/bio_sample`) and the controller pushes them into the
+runtime: heart rate as `sdk_wear`, beat intervals as `watch_sample`.
+
+The Data Layer only delivers between apps with the **same package name and
+signing key**, so the watch app must be built as `ai.synheart.core.example`
+and signed with the same key as this app. Start the phone session, tap
+**Receive from watch**, then start a session on the watch. A watch without a
+beat-detection sensor sends heart rate only, so the card shows no beat
+intervals and HRV stays unavailable.
+
 ## Code map
 
 ```
 lib/
   main.dart                     app shell, tab navigation
   sdk/
-    synheart_controller.dart    lifecycle: initialize, consent, session
+    synheart_controller.dart    lifecycle: initialize, consent, session,
+                                daily scores, Health Connect import, watch samples
     mobile_host_runner.dart     what a host keeps doing once a session runs
     sync_runner.dart            cross-device sync: space, pairing, devices
     axis_coverage.dart          all 18 canonical axes: present / withheld / absent
   screens/
     setup_screen.dart           config + initialize
     consent_screen.dart         runtime editable-form consent flow
-    session_screen.dart         start/stop, live HSI, signal sources
+    session_screen.dart         start/stop, watch samples, live HSI, signal sources
     host_screen.dart            tick loop, rest, snapshots, daily loop
     sync_screen.dart            sync readiness, status, pairing, devices
-    diagnostics_screen.dart     runtime version, native symbol audit
+    diagnostics_screen.dart     runtime version, native symbol audit, daily scores
   widgets/ui.dart               shared building blocks
 example.dart                    minimal standalone snippet
+android/app/src/main/kotlin/ai/synheart/core/example/
+  MainActivity.kt               sensing foreground service channel
+  WatchSampleBridge.kt          Wear OS watch samples → Dart
 ```
 
 Start with `sdk/synheart_controller.dart`. Only `sdk/` calls the SDK: no
@@ -156,6 +182,13 @@ screen imports `package:synheart_core` — they read state from the controller
   carries baselines only, not HSI windows or sessions. It is also a paid-plan
   feature. The SDK does not check the plan; the host does. This example has no
   sign-in, so it needs an account or environment where the server allows it.
+- **Daily scores and their baselines** — the Runtime tab scores a night the
+  person reports (bedtime and wake time) and shows the baselines the runtime
+  holds for it: `dailySleepBaselines()` and `dailyBaselineRefs()` (C ABI 4.2),
+  each as value and confidence, or withheld. A night never sits in its own
+  baseline, so the first one shows every baseline withheld. A reported night
+  carries no stages or heart rate: deep, REM, overnight HR and the Recovery
+  references stay withheld until a health source or watch supplies them.
 - **Runtime diagnostics** — `runtimeDiagnostics(probeAll: true)` reports which
   optional native symbols the loaded runtime exports. Optional bindings resolve
   lazily, so a screen that just reads `missingSymbols` looks healthy while

@@ -15,6 +15,9 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        WatchSampleBridge(applicationContext)
+            .register(flutterEngine.dartExecutor.binaryMessenger)
+
         // Start/stop the sensing foreground service from Dart, so its lifetime
         // matches the session rather than the activity. See
         // SensingForegroundService for why the session needs it: the runtime

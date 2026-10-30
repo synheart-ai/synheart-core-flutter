@@ -41,6 +41,10 @@ dependencies:
   # Persists the demo subjectId / deviceId across restarts
   shared_preferences: ^2.2.2
 
+  # Health Connect permission request for the history import; the same range
+  # synheart_core resolves.
+  synheart_wear: ">=0.6.0 <0.7.0"
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
