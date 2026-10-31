@@ -95,12 +95,17 @@ void main() {
         RuntimeCompat.check({'core_runtime': '0.43.0'}).status,
         RuntimeCompatStatus.tooOld,
       );
-      final ok = RuntimeCompat.check({'core_runtime': '0.45.0'});
+      final ok = RuntimeCompat.check({
+        'core_runtime': RuntimeCompat.writtenAgainst,
+      });
       expect(ok.status, RuntimeCompatStatus.ok);
       expect(ok.abi, isNull);
     });
     test('a malformed abi is treated as absent', () {
-      final r = RuntimeCompat.check({'core_runtime': '0.45.0', 'abi': 'x'});
+      final r = RuntimeCompat.check({
+        'core_runtime': RuntimeCompat.writtenAgainst,
+        'abi': 'x',
+      });
       expect(r.status, RuntimeCompatStatus.ok);
       expect(r.abi, isNull);
     });
