@@ -15,7 +15,7 @@ class RuntimeCompat {
   /// release every install hint recommends. Bump it when the bindings adopt a
   /// new symbol or a moved shape, or once they are verified on a newer
   /// release.
-  static const String writtenAgainst = '0.45.0';
+  static const String writtenAgainst = '0.46.0';
 
   /// Oldest runtime the bindings are known to load and behave on. Below this
   /// the SDK refuses to initialise rather than run with entrypoints that no
