@@ -658,7 +658,7 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.22.0"
+    version: "0.22.1"
   synheart_session:
     dependency: transitive
     description:
