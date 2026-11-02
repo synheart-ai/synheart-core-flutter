@@ -11,6 +11,7 @@ import 'config/api_endpoints.dart';
 import 'config/runtime_config_map.dart';
 import 'config/synheart_config.dart';
 import 'core/bounded_buffer.dart';
+import 'core/hsi_consent_gate.dart';
 import 'core/hsi_delivery_deduper.dart';
 import 'core/logger.dart';
 import 'modules/base/module_manager.dart';
@@ -3837,12 +3838,13 @@ class Synheart {
     // once a frame holds it, whether or not Dart forwards the frame.
     Baselines.noteHsiFrame(hsiJson);
 
-    final local = _consentModule?.current();
-    final effective = _coreRuntime?.consentEffectiveState();
-    final biosignalsEffective =
-        effective?['biosignals'] == true || effective?['research'] == true;
-    final biosignalsLocal = local?.biosignals == true;
-    if (!biosignalsEffective && !biosignalsLocal) return;
+    // Any collection consent, not biosignals alone: see [hsiDeliveryAllowed].
+    if (!hsiDeliveryAllowed(
+      effective: _coreRuntime?.consentEffectiveState(),
+      local: _consentModule?.current(),
+    )) {
+      return;
+    }
 
     if (!_hsvStream.isClosed) _hsvStream.add(hsiJson);
     // Surface motion-state on BehaviorModule for consumers that want a
