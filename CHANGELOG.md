@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`synheart_wear` minimum raised to 0.6.1** (`>=0.6.1 <0.7.0`). 0.6.1 asks
+  Apple Health and Health Connect for read access only; 0.6.0 asked for read
+  and write, so an app had to declare `WRITE_*` permissions and
+  `NSHealthUpdateUsageDescription` it never used. Apps that do not write health
+  data themselves can now drop them. The example no longer declares them.
+
 ### Fixed
 
 - **HSI reaches apps without biosignals consent.** Every completed window was
