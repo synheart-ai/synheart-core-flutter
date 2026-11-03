@@ -254,7 +254,10 @@ class WearableEventProcessor {
       observedAtKey: 'calendarDate',
       providerRecordIdKey: 'summaryId',
       extractPayload: (p) => {
-        'rmssd_ms': _asDouble(p['weeklyAvg']) ?? _asDouble(p['lastNightAvg']),
+        // Last night's average is the nightly figure; the weekly average is
+        // a 7-day mean and is kept apart so it is never read as one night.
+        'rmssd_ms': _asDouble(p['lastNightAvg']),
+        'weekly_avg_rmssd_ms': _asDouble(p['weeklyAvg']),
         'status': p['hrvStatus'],
       },
     ),
