@@ -23,6 +23,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only behavior or phone context never saw its digital axes. A window is now
   delivered when any collection category (biosignals, behavior, phone context)
   or research is granted. With nothing granted, windows are still dropped.
+- **Resting HR baseline gets the resting-HR record.** A night's
+  `cardiac.resting_hr_bpm` was the mean HR asleep even when HealthKit, Health
+  Connect or a vendor reported a resting HR. The two now stay apart:
+  `cardiac.overnight_hr_bpm` is the mean HR asleep (the Sleep Score's HR
+  term), `cardiac.resting_hr_bpm` the resting-HR record (Recovery and
+  Readiness). A source with one overnight figure, such as WHOOP's resting HR,
+  still fills both. A daytime resting HR on its own, such as Garmin's, fills
+  resting only.
+- **Steps are pushed only for days that are over.** A night's push carried
+  the wake day's step count while that day was still going, so a partial
+  total was stored as the day's figure. `HealthConnectRuntimeSink` now also
+  pushes steps for finished days that have no night.
+- **Daily values are no longer dropped when no session is running.**
+  `srmPushWearableDaily` and `srmRefreshWearableReference` build the
+  pipeline first. Health-store pulls and vendor syncs usually run with no
+  session open, and the runtime refused every value with `-1`: on iOS a
+  whole pull of history reached the baselines as nothing.
+- Garmin `hrv.updated` events carry last night's average HRV as `rmssd_ms`.
+  They carried the 7-day average when Garmin sent one; that is now
+  `weekly_avg_rmssd_ms`.
 
 ## [0.22.1] - 2026-10-30
 
