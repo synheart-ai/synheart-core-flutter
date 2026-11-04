@@ -28,8 +28,6 @@
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Synheart Core needs access to your health data to provide personalized insights and track your biometric metrics.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Synheart Core needs to update your health data to sync wearable device information.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

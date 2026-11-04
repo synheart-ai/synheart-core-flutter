@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -321,14 +323,26 @@ class _DailyScoresCardState extends State<_DailyScoresCard> {
           ),
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _busy ? null : _import,
-            icon: const Icon(Icons.watch_outlined),
-            label: const Text('Import Health Connect (30 days)'),
+        // Health Connect history is Android only. On iOS the SDK imports
+        // history from an Apple Health export.zip (AppleHealthRuntimeSink),
+        // which this example does not wire up, so say so instead of offering
+        // a button that can only report "skipped".
+        if (defaultTargetPlatform == TargetPlatform.android)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _import,
+              icon: const Icon(Icons.watch_outlined),
+              label: const Text('Import Health Connect (30 days)'),
+            ),
+          )
+        else
+          Text(
+            'History import on iOS comes from an Apple Health export.zip '
+            '(AppleHealthRuntimeSink), which this example does not include. '
+            'Live Apple Health data still reaches the session.',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-        ),
         if (c.lastHealthImport case final r?)
           KeyValueRow(
             'last import',

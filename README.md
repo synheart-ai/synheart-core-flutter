@@ -194,14 +194,15 @@ declarations do not replace an in-app explanation and runtime permission flow.
 ### iOS
 
 Enable the HealthKit capability in Xcode when using wearable or Apple Health
-data. Add usage descriptions to `ios/Runner/Info.plist`:
+data. The SDK only reads health data, so it needs the read usage description
+in `ios/Runner/Info.plist`:
 
 ```xml
 <key>NSHealthShareUsageDescription</key>
 <string>This app reads health data to calculate consented wellbeing insights.</string>
-<key>NSHealthUpdateUsageDescription</key>
-<string>This app writes supported health data when you enable health synchronization.</string>
 ```
+
+Add `NSHealthUpdateUsageDescription` only if your own app writes to HealthKit.
 
 Use wording that accurately describes your application. See
 `example/ios/Runner/Info.plist` for a working project configuration.
@@ -220,7 +221,8 @@ Common declarations are:
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
-<!-- Health Connect: include only the record types your app reads or writes. -->
+<!-- Health Connect: the SDK only reads. Include the record types your app reads;
+     WRITE_* only if your own app writes. -->
 <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
 <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
 <uses-permission android:name="android.permission.health.READ_STEPS" />
