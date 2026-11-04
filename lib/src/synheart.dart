@@ -3767,7 +3767,11 @@ class Synheart {
   ///
   /// Returns `0`; `1004` for an unknown metric; `5002` for a value outside
   /// the metric's plausible bounds or a stream the person has not permitted
-  /// (not stored); `-1` with no running pipeline or no runtime.
+  /// (not stored); `-1` with no runtime.
+  ///
+  /// Builds the pipeline first when none is running: daily values arrive
+  /// from health-store pulls and vendor syncs with no session open, and the
+  /// runtime drops them (`-1`) without one.
   static int srmPushWearableDaily({
     required String provider,
     required String metric,
@@ -3775,6 +3779,7 @@ class Synheart {
     required double value,
     bool vendorSummary = true,
   }) {
+    _coreRuntime?.ensurePipeline();
     return _coreRuntime?.srmPushWearableDaily(
           provider: provider,
           metric: metric,
@@ -3790,9 +3795,11 @@ class Synheart {
   /// Rebuild the wearable reference from the daily values of the local dates
   /// before [asOf] (default: today, local), and hand it to the state heads.
   /// Call once a day after [srmPushWearableDaily]. Returns `0`, `1004`,
-  /// `1002` (busy), `-1` (no pipeline), or `null` without the call.
+  /// `1002` (busy), `-1` (no pipeline), or `null` without the call. Builds
+  /// the pipeline first when none is running, as [srmPushWearableDaily] does.
   static int? srmRefreshWearableReference({DateTime? asOf}) {
     final d = asOf ?? DateTime.now();
+    _coreRuntime?.ensurePipeline();
     return _coreRuntime?.srmRefreshWearableReference(d.year, d.month, d.day);
   }
 

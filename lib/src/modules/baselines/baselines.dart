@@ -766,6 +766,10 @@ class Baselines {
                     extracted.overnightHrBpm ?? crossProvider?.overnightHrBpm,
                 respiratoryRateBrpm: extracted.respiratoryRateBrpm,
                 spo2Pct: extracted.spo2Pct,
+                restingHrBpm:
+                    extracted.restingHrBpm ?? crossProvider?.restingHrBpm,
+                asleepHrBpm:
+                    extracted.asleepHrBpm ?? crossProvider?.asleepHrBpm,
               );
               _recentOvernight.add(tonightOvernight);
               while (_recentNights.length > _maxPriors) {
@@ -835,15 +839,7 @@ class Baselines {
               _pushDailyToRuntimeSrm(
                 provider: provider,
                 wakeDayIndex: dayKey,
-                overnight: OvernightPhysiology(
-                  hrvRmssdMs: extracted.hrvRmssdMs,
-                  hrvSdnnMs: extracted.hrvSdnnMs,
-                  hrStdBpm: extracted.hrStdBpm,
-                  stepsCount: extracted.stepsCount,
-                  overnightHrBpm: extracted.overnightHrBpm,
-                  respiratoryRateBrpm: extracted.respiratoryRateBrpm,
-                  spo2Pct: extracted.spo2Pct,
-                ),
+                overnight: extracted,
                 raw: v.raw,
               );
             }
@@ -941,6 +937,10 @@ class Baselines {
                       extracted.overnightHrBpm ?? crossProvider?.overnightHrBpm,
                   respiratoryRateBrpm: extracted.respiratoryRateBrpm,
                   spo2Pct: extracted.spo2Pct,
+                  restingHrBpm:
+                      extracted.restingHrBpm ?? crossProvider?.restingHrBpm,
+                  asleepHrBpm:
+                      extracted.asleepHrBpm ?? crossProvider?.asleepHrBpm,
                 );
                 for (var i = _recentNights.length - 1; i >= 0; i--) {
                   if (_recentNights[i].wakeCalendarDate == wakeDate) {
@@ -1349,10 +1349,11 @@ class Baselines {
     double? sdnn = _numDouble(payload['hrv_sdnn_ms']);
     double? hrStd = _numDouble(payload['hr_std_bpm']);
     double? steps = _numDouble(payload['steps_count']);
-    double? hr =
-        _numDouble(payload['avg_hr_bpm']) ??
-        _numDouble(payload['resting_hr_bpm']) ??
-        _numDouble(payload['hr']);
+    // Kept apart: the mean HR asleep is the Sleep Score's HR baseline, the
+    // resting-HR record is Recovery's and Readiness's.
+    double? asleep = _numDouble(payload['avg_hr_bpm']);
+    double? resting = _numDouble(payload['resting_hr_bpm']);
+    double? hr = asleep ?? resting ?? _numDouble(payload['hr']);
     double? rr = _numDouble(payload['respiratory_rate_brpm']);
     double? spo2 = _numDouble(payload['spo2_pct']);
 
@@ -1372,6 +1373,8 @@ class Baselines {
           _numDouble(score['hrv_rmssd_milli']) ??
           _numDouble(score['hrv_rmssd_ms']);
       sdnn ??= _numDouble(score['hrv_sdnn_ms']);
+      resting ??= _numDouble(score['resting_heart_rate']);
+      asleep ??= _numDouble(score['avg_hr_bpm']);
       hr ??=
           _numDouble(score['resting_heart_rate']) ??
           _numDouble(score['avg_hr_bpm']);
@@ -1382,6 +1385,10 @@ class Baselines {
           _numDouble(score['spo2_percentage']) ?? _numDouble(score['spo2_pct']);
     }
 
+    // WHOOP's resting HR is measured asleep: its only overnight figure, so it
+    // is the night's HR as well (the runtime's rule for one overnight figure).
+    if (provider == 'whoop') asleep ??= resting;
+
     return OvernightPhysiology(
       hrvRmssdMs: hrv,
       hrvSdnnMs: sdnn,
@@ -1390,6 +1397,8 @@ class Baselines {
       overnightHrBpm: hr,
       respiratoryRateBrpm: rr,
       spo2Pct: spo2,
+      restingHrBpm: resting,
+      asleepHrBpm: asleep,
     );
   }
 
@@ -1636,15 +1645,21 @@ class Baselines {
   ///
   /// Either field may be `null` — the engine treats absence as "no
   /// signal" rather than synthesizing a neutral value.
+  ///
+  /// [restingHrBpm] is a resting-HR record. Pass [asleepHrBpm] only for a
+  /// figure measured asleep (WHOOP's resting HR is one); a daytime resting
+  /// HR (Garmin's) is not the night's heart rate and never becomes the Sleep
+  /// Score's HR baseline.
   static void attachOvernightPhysiology({
     required DateTime occurredAt,
     double? hrvRmssdMs,
     double? restingHrBpm,
+    double? asleepHrBpm,
   }) {
     final day = _epochDay(occurredAt);
     final next = OvernightPhysiology(
       hrvRmssdMs: hrvRmssdMs,
-      overnightHrBpm: restingHrBpm,
+      overnightHrBpm: asleepHrBpm ?? restingHrBpm,
     );
     if (!next.hasSignal) return;
     // Merge into any existing entry rather than overwrite — recovery
@@ -1653,7 +1668,9 @@ class Baselines {
     final prev = _overnightByDay[day];
     _overnightByDay[day] = OvernightPhysiology(
       hrvRmssdMs: hrvRmssdMs ?? prev?.hrvRmssdMs,
-      overnightHrBpm: restingHrBpm ?? prev?.overnightHrBpm,
+      overnightHrBpm: asleepHrBpm ?? restingHrBpm ?? prev?.overnightHrBpm,
+      restingHrBpm: restingHrBpm ?? prev?.restingHrBpm,
+      asleepHrBpm: asleepHrBpm ?? prev?.asleepHrBpm,
     );
 
     // Trim to the prior-window horizon so the map doesn't unbounded-grow.
@@ -1813,6 +1830,8 @@ class Baselines {
           occurredAt: DateTime.fromMillisecondsSinceEpoch(observedAtMs),
           hrvRmssdMs: hrv,
           restingHrBpm: rhr,
+          // WHOOP measures resting HR asleep; Garmin's is the day's.
+          asleepHrBpm: provider == 'whoop' ? rhr : null,
         );
         attached++;
       }
@@ -1958,6 +1977,59 @@ class Baselines {
   /// Totals come from an `AggregatedNight` (via `raw.detail`);
   /// `SegmentedNight` and `VendorScoreNight` carry none, so only their
   /// overnight HR/HRV (from the per-provider extractor) is written.
+  /// The daily values one night writes into the personal baselines, keyed
+  /// by [DailyMetric] name. The pure half of [_pushDailyToRuntimeSrm].
+  ///
+  /// [wakeDate] and [today] are read as calendar dates only.
+  @visibleForTesting
+  static Map<String, double> nightDailyValues({
+    required OvernightPhysiology overnight,
+    required DateTime wakeDate,
+    required DateTime today,
+    double? midpointH,
+    double? asleepMinutes,
+    double? deepMinutes,
+    double? remMinutes,
+  }) {
+    final out = <String, double>{};
+    // A zero is no measurement for every metric here except the midpoint,
+    // where 0.0 is midnight.
+    void put(String metric, double? value, {bool zeroIsValue = false}) {
+      if (value == null || value < 0 || (value == 0 && !zeroIsValue)) return;
+      out[metric] = value;
+    }
+
+    // Apple Health (HKHeartRateVariabilitySDNN) is the SDNN source;
+    // WHOOP/Garmin/Health Connect ship RMSSD.
+    put(DailyMetric.overnightSdnnMs, overnight.hrvSdnnMs);
+    put(DailyMetric.overnightHrSdBpm, overnight.hrStdBpm);
+    // Steps are the wake day's total, which is still growing until that day
+    // ends; a partial count would be stored as the day's figure.
+    final wake = DateTime(wakeDate.year, wakeDate.month, wakeDate.day);
+    if (wake.isBefore(DateTime(today.year, today.month, today.day))) {
+      put(DailyMetric.stepsCount, overnight.stepsCount);
+    }
+    put(DailyMetric.overnightRmssdMs, overnight.hrvRmssdMs);
+    // Two heart-rate baselines. `overnight_hr_bpm` is the night's mean HR
+    // asleep (the Sleep Score's HR term); `resting_hr_bpm` is the resting-HR
+    // record (Recovery and Readiness). A source with one overnight figure
+    // pushes it to both, and resting HR is never dropped. A daytime resting
+    // HR on its own is not the night's HR, so it fills resting only.
+    final asleepHr =
+        overnight.asleepHrBpm ??
+        (overnight.restingHrBpm == null ? overnight.overnightHrBpm : null);
+    put(DailyMetric.overnightHrBpm, asleepHr);
+    put(DailyMetric.restingHrBpm, overnight.restingHrBpm ?? asleepHr);
+    // Only a night with a start and end has a midpoint; never derived.
+    put(DailyMetric.sleepMidpointH, midpointH, zeroIsValue: true);
+    if (asleepMinutes != null) {
+      put(DailyMetric.sleepDurationS, asleepMinutes * 60.0);
+    }
+    put(DailyMetric.sleepDeepMin, deepMinutes);
+    put(DailyMetric.sleepRemMin, remMinutes);
+    return out;
+  }
+
   static void _pushDailyToRuntimeSrm({
     required String provider,
     required int wakeDayIndex,
@@ -1968,11 +2040,19 @@ class Baselines {
       wakeDayIndex * 86400000,
       isUtc: true,
     );
+    final detail = raw.detail;
+    final totals = detail is AggregatedNight ? detail.totals : null;
+    final values = nightDailyValues(
+      overnight: overnight,
+      wakeDate: date,
+      today: DateTime.now(),
+      midpointH: _sleepMidpointH(raw),
+      asleepMinutes: totals?.totalSleepMinutes,
+      deepMinutes: totals?.deepSleepMinutes,
+      remMinutes: totals?.remSleepMinutes,
+    );
     var pushed = false;
-    // A zero is no measurement for every metric here except the midpoint,
-    // where 0.0 is midnight.
-    void push(String metric, double? value, {bool zeroIsValue = false}) {
-      if (value == null || value < 0 || (value == 0 && !zeroIsValue)) return;
+    values.forEach((metric, value) {
       final rc = Synheart.srmPushWearableDaily(
         provider: provider,
         metric: metric,
@@ -1987,30 +2067,7 @@ class Baselines {
         );
       }
       pushed = true;
-    }
-
-    // Apple Health (HKHeartRateVariabilitySDNN) is the SDNN source;
-    // WHOOP/Garmin/Health Connect ship RMSSD.
-    push(DailyMetric.overnightSdnnMs, overnight.hrvSdnnMs);
-    push(DailyMetric.overnightHrSdBpm, overnight.hrStdBpm);
-    push(DailyMetric.stepsCount, overnight.stepsCount);
-    push(DailyMetric.overnightRmssdMs, overnight.hrvRmssdMs);
-    // One overnight heart-rate figure feeds both baselines: the night's mean
-    // HR is the Sleep Score's HR baseline, and without a resting-HR baseline
-    // Recovery cannot personalise nor Readiness align. A source with a
-    // separate resting HR would push that one as `restingHrBpm` instead.
-    push(DailyMetric.overnightHrBpm, overnight.overnightHrBpm);
-    push(DailyMetric.restingHrBpm, overnight.overnightHrBpm);
-    // Only a night with a start and end has a midpoint; never derived.
-    push(DailyMetric.sleepMidpointH, _sleepMidpointH(raw), zeroIsValue: true);
-
-    final detail = raw.detail;
-    if (detail is AggregatedNight) {
-      final totals = detail.totals;
-      push(DailyMetric.sleepDurationS, totals.totalSleepMinutes * 60.0);
-      push(DailyMetric.sleepDeepMin, totals.deepSleepMinutes);
-      push(DailyMetric.sleepRemMin, totals.remSleepMinutes);
-    }
+    });
 
     // One refresh per night, as of today: the reference is built from the
     // dates before today, so today's windows are never judged against

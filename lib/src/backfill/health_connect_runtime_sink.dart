@@ -93,8 +93,8 @@ class HealthConnectBackfillResult {
 /// - `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` from
 ///   [HealthAdapter.fetchSleepNights], and `sleep.midpoint_h` from the
 ///   night's recorded start and end (never derived from totals).
-/// - `motion.active_min` from [HealthAdapter.fetchActiveMinutes], for days
-///   that are over.
+/// - `motion.active_min` from [HealthAdapter.fetchActiveMinutes] and
+///   `motion.steps_count` from the day's step total, for days that are over.
 ///
 /// All values land via `Synheart.srmPushWearableDaily`, which feeds
 /// the longitudinal SRM directly and the live SRM via the Synheart
@@ -266,9 +266,13 @@ class HealthConnectRuntimeSink {
         }
       }
 
-      final active = activeMinutes[day];
-      if (active != null && active > 0 && day.isBefore(today)) {
-        push(DailyMetric.activeMin, active);
+      // Day totals only for days that are over, with or without a night:
+      // Strain reads the closed day, and today's count is still growing.
+      if (day.isBefore(today)) {
+        final active = activeMinutes[day];
+        if (active != null && active > 0) push(DailyMetric.activeMin, active);
+        final steps = overnightSummary?.stepsCount;
+        if (steps != null && steps > 0) push(DailyMetric.stepsCount, steps);
       }
 
       if (dayDidPush) daysIngested += 1;

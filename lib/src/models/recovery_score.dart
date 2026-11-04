@@ -105,9 +105,22 @@ class OvernightPhysiology {
   final double? hrvSdnnMs;
   final double? hrStdBpm;
   final double? stepsCount;
+
+  /// The night's heart rate as Recovery reads it: the mean HR asleep, or a
+  /// vendor's resting HR when that is the only overnight figure.
   final double? overnightHrBpm;
   final double? respiratoryRateBrpm;
   final double? spo2Pct;
+
+  /// A resting-HR record: the platform's (HealthKit, Health Connect) or a
+  /// vendor's daily resting HR. Feeds the `cardiac.resting_hr_bpm` baseline.
+  /// Not part of [toJson]; the engine's input has no such field.
+  final double? restingHrBpm;
+
+  /// Mean HR while asleep, or a vendor's single overnight HR figure (WHOOP's
+  /// resting HR is measured asleep). Feeds `cardiac.overnight_hr_bpm`, the
+  /// Sleep Score's HR baseline. Not part of [toJson].
+  final double? asleepHrBpm;
 
   const OvernightPhysiology({
     this.hrvRmssdMs,
@@ -117,6 +130,8 @@ class OvernightPhysiology {
     this.overnightHrBpm,
     this.respiratoryRateBrpm,
     this.spo2Pct,
+    this.restingHrBpm,
+    this.asleepHrBpm,
   });
 
   /// `true` if at least one of HR or HRV is reported. SDNN, hr-std,
