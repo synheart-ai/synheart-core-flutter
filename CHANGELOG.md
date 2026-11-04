@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **HSI reaches apps without biosignals consent.** Every completed window was
+  dropped before `onHSIUpdate`, `onStateUpdate` and `getSessionHsiWindows()`
+  unless biosignals (or research) consent was granted, so an app collecting
+  only behavior or phone context never saw its digital axes. A window is now
+  delivered when any collection category (biosignals, behavior, phone context)
+  or research is granted. With nothing granted, windows are still dropped.
+
 ## [0.22.1] - 2026-10-30
 
 ### Changed

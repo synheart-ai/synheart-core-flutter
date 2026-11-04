@@ -64,8 +64,9 @@ class ConsentScreen extends StatelessWidget {
                     ConsentToggle(
                       title: 'Biosignals',
                       description:
-                          'Heart rate and HRV. Required for HSI — without it '
-                          'the runtime drops every window.',
+                          'Heart rate and HRV. Without it the physiological '
+                          'axes are withheld; HSI still arrives with any '
+                          'other collection consent.',
                       value: form.biosignals,
                       enforced: state?.biosignals,
                       onChanged: (v) => c.editConsent(biosignals: v),
