@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-04
+
 ### Changed
 
-- **`synheart_wear` minimum raised to 0.6.1** (`>=0.6.1 <0.7.0`). 0.6.1 asks
-  Apple Health and Health Connect for read access only; 0.6.0 asked for read
-  and write, so an app had to declare `WRITE_*` permissions and
+- **`synheart_wear` minimum raised to 0.6.2** (`>=0.6.2 <0.7.0`). Since 0.6.1
+  it asks Apple Health and Health Connect for read access only; 0.6.0 asked
+  for read and write, so an app had to declare `WRITE_*` permissions and
   `NSHealthUpdateUsageDescription` it never used. Apps that do not write health
   data themselves can now drop them. The example no longer declares them.
+  0.6.2 reads overnight HRV and HR spread from the samples taken asleep, which
+  the Health Connect backfill pushes into the overnight baselines; with 0.6.1
+  they were whole-day figures.
 
 ### Fixed
 
