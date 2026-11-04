@@ -1007,15 +1007,60 @@ class SynheartController extends ChangeNotifier {
 
   /// Force a registration attempt without waiting for a consent change.
   /// Returns false when device auth is not configured.
+  ///
+  /// Uses the throwing variant: `ensureDeviceAuthRegistered` swallows the
+  /// server's refusal and returns false, which hides why a device did not
+  /// register (attestation not admitted, account mismatch, dev mode off).
   Future<bool> registerDevice() async {
-    final ok = await Synheart.ensureDeviceAuthRegistered();
+    bool ok = false;
+    try {
+      ok = await Synheart.ensureDeviceAuthRegisteredOrThrow();
+      registerResult = ok
+          ? 'ok: registered'
+          : 'not registered: device auth not configured, or the device '
+                'could not attest (see log)';
+    } on SynheartNativeException catch (e) {
+      registerResult =
+          'failed: ${e.code} — ${e.message}'
+          '${e.retryable ? ' (retryable)' : ''}';
+    } catch (e) {
+      registerResult = 'failed: $e';
+    }
+    debugPrint('[Example] Register $registerResult');
     notifyListeners();
     return ok;
   }
 
+  /// Outcome of the last Register now tap, shown under the button. Null until
+  /// the first tap.
+  String? registerResult;
+
+  /// Outcome of the last Re-attest tap, shown under the button. Null until
+  /// the first tap.
+  String? reattestResult;
+
   /// Refresh the current identity's server attestation without rotating it.
+  ///
+  /// `reattestDeviceAuth` throws [SynheartNativeException] when the server
+  /// refuses (expired or revoked registration, account mismatch, attestation
+  /// not admitted). Caught here so a refusal reads as a result on screen rather
+  /// than an unhandled exception from a button tap.
   Future<bool> reattestDevice() async {
-    final ok = await Synheart.reattestDeviceAuth();
+    bool ok = false;
+    try {
+      ok = await Synheart.reattestDeviceAuth();
+      reattestResult = ok
+          ? 'ok: attestation refreshed, same device id'
+          : 'not run: device auth not configured, or the runtime has no '
+                're-attest call';
+    } on SynheartNativeException catch (e) {
+      reattestResult =
+          'failed: ${e.code} — ${e.message}'
+          '${e.retryable ? ' (retryable)' : ''}';
+    } catch (e) {
+      reattestResult = 'failed: $e';
+    }
+    debugPrint('[Example] Re-attest $reattestResult');
     notifyListeners();
     return ok;
   }

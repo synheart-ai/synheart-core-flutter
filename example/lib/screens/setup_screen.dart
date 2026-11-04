@@ -273,11 +273,16 @@ class _SetupScreenState extends State<SetupScreen> {
                     ),
                   ],
                 ),
+                if (c.registerResult case final r?)
+                  KeyValueRow('last register', r),
+                if (c.reattestResult case final r?)
+                  KeyValueRow('last re-attest', r),
                 const SizedBox(height: 6),
                 Text(
                   'Register now is idempotent — it no-ops when already '
-                  'registered. Re-attest forces a fresh registration, for when '
-                  'the server has lost or revoked the device record.',
+                  'registered. Re-attest refreshes the server attestation and '
+                  'keeps the same device id, key and sync membership. A refusal '
+                  '(expired, revoked, account mismatch) is shown above.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
