@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `WearSample.hrvSdnn`: SDNN from the wear source, in ms.
+
+### Fixed
+- `WearSample.hrvRmssd` no longer carries SDNN when the source has no RMSSD
+  (Apple Health). Read `hrvSdnn` for that value.
+- Deprecation messages no longer name 0.12.0 as the removal version.
+
 ## [0.23.0] - 2026-11-04
 
 ### Changed
