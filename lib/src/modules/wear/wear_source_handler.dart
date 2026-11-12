@@ -8,7 +8,12 @@ enum WearSourceType { appleHealth, googleFit, whoop, garmin, mock }
 class WearSample {
   final DateTime timestamp;
   final double? hr;
+
+  /// RMSSD in ms. Null when the source only measured SDNN.
   final double? hrvRmssd;
+
+  /// SDNN in ms (Apple Health's HRV). Not interchangeable with RMSSD.
+  final double? hrvSdnn;
   final double? respRate;
   final double? motionLevel;
   final SleepStage? sleepStage;
@@ -18,6 +23,7 @@ class WearSample {
     required this.timestamp,
     this.hr,
     this.hrvRmssd,
+    this.hrvSdnn,
     this.respRate,
     this.motionLevel,
     this.sleepStage,
