@@ -61,7 +61,7 @@ class WearModule extends BaseSynheartModule
     List<WearSourceHandler>? sources,
     @Deprecated(
       'Passing false now yields no sources rather than a mock. Inject your own '
-      'WearSourceHandler via `sources:` for tests. Will be removed in 0.12.0.',
+      'WearSourceHandler via `sources:` for tests. Will be removed in a future release.',
     )
     bool useSynheartWear = true,
     bool focusEnabled = false,

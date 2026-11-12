@@ -3923,7 +3923,7 @@ class Synheart {
   /// `baselines_json`.
   @Deprecated(
     'Duplicate of runtimeBaselinesJson — both return the same native payload. '
-    'Use runtimeBaselinesJson. Will be removed in 0.12.0.',
+    'Use runtimeBaselinesJson. Will be removed in a future release.',
   )
   static String? get runtimeBaselineSummary => runtimeBaselinesJson;
 
@@ -6050,7 +6050,7 @@ class Synheart {
   @Deprecated(
     'Never deleted anything — it only logged. Use requestDataDeletion() for '
     'cloud-side erasure and wipeLocalData() for on-device data. Will be '
-    'removed in 0.12.0.',
+    'removed in a future release.',
   )
   static Future<void> deleteCloudData() async {
     throw UnsupportedError(
