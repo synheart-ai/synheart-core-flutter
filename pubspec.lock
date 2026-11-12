@@ -649,10 +649,10 @@ packages:
     dependency: "direct main"
     description:
       name: synheart_wear
-      sha256: c583f0f99491c597e4e017fe031d8862a9437cf0b607f31d14439c33174fa4c7
+      sha256: "1356637927ca8f52e076e6deca496dcba0b270df258fc439f2104c1aa85b0029"
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.2"
+    version: "0.7.0"
   syni:
     dependency: "direct main"
     description:
