@@ -635,6 +635,9 @@ window of a session never carries them.
 ```dart
 final wearSub = Synheart.wearSampleStream.listen((sample) {
   print('HR: ${sample.hr}');
+  // RMSSD (Health Connect, BLE) and SDNN (Apple Health) are different
+  // statistics; each source fills only the one it measures.
+  print('HRV RMSSD: ${sample.hrvRmssd}  SDNN: ${sample.hrvSdnn}');
   print('RR: ${sample.rrIntervals}');
 });
 
@@ -1346,7 +1349,7 @@ changes in 0.11.0:
   module flag, so it reflects a session ended natively.
 - Removed: `MockWearSourceHandler`, `HsiWindowArtifact`, `TombstoneArtifact`,
   `CapabilityTokenFetcher`.
-- Deprecated, removed in 0.12.0: `SynheartConfig.capabilityToken` /
+- Deprecated, to be removed in a future release: `SynheartConfig.capabilityToken` /
   `.capabilitySecret`, `CloudConfig.apiKey`, `ConsentConfig.appApiKey`,
   `getSyncStatus()`, `runtimeBaselineSummary`, `WearModule(useSynheartWear:)`.
   The native runtime removed bundle-secret configuration as a security fix;
