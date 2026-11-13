@@ -691,6 +691,7 @@ class SynheartController extends ChangeNotifier {
   static bool _carriesBiosignal(WearSample s) =>
       s.hr != null ||
       s.hrvRmssd != null ||
+      s.hrvSdnn != null ||
       (s.rrIntervals?.isNotEmpty ?? false);
 
   // ── Watch companion ────────────────────────────────────────────────────

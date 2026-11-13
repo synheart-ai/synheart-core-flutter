@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-12
+
+### Added
+- `WearSample.hrvSdnn`: SDNN from the wear source, in ms.
+
+### Changed
+- **`synheart_wear` minimum raised to 0.7.0** (`>=0.7.0 <0.8.0`). Earlier
+  versions copy Apple Health's SDNN into the RMSSD field, so `hrvRmssd` would
+  still carry SDNN. 0.7.0 also encrypts its session cache with AES-256-GCM and
+  no longer returns empty reads right after `initialize()` on Android.
+
+### Fixed
+- `WearSample.hrvRmssd` no longer carries SDNN when the source has no RMSSD
+  (Apple Health). Read `hrvSdnn` for that value.
+- Deprecation messages no longer name 0.12.0 as the removal version.
+
 ## [0.23.0] - 2026-11-04
 
 ### Changed

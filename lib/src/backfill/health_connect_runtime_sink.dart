@@ -6,16 +6,16 @@
 // is an API-only system database with no user-facing export gesture.
 // What it DOES offer is a permission-gated `getHealthDataFromTypes`
 // read with a `(start, end)` window, which lets us pull as far back
-// as the system retained the data for that record type.
+// as the app is allowed to read.
 //
-// Retention is per-record-type and outside our control. As of 2026:
-//   - Heart rate samples: typically 30 days of high-resolution data
-//   - Sleep sessions: 1–2 years
-//   - Steps / activity: years
-//
-// So an Android user gets less historical context than an iOS user
-// importing a years-old `export.zip`. There's no platform fix for
-// that — we just pull what's there.
+// That reach is set by a permission, not by what the store kept.
+// Health Connect lets an app read only the 30 days before it was first
+// granted access — for every record type, sleep included — unless the
+// app also holds `READ_HEALTH_DATA_HISTORY`. The host declares that in
+// its manifest and asks for it separately (synheart_wear's
+// `HealthAdapter.requestHistoryAuthorization()`, or the `health`
+// package directly). Without it, `backfill(daysBack: 365)` completes
+// normally and reads about 30 days.
 //
 // On iOS this class is a no-op fast-return: HealthKit historical
 // data lives behind the Apple Health export.zip path
@@ -111,8 +111,9 @@ class HealthConnectRuntimeSink {
 
   /// Pull `daysBack` days of historical sleep + overnight physiology
   /// from Health Connect (Android) and push them into the runtime
-  /// SRM. Default is 365 days; the actual window is bounded by
-  /// platform retention (30 days for HR, longer for sleep).
+  /// SRM. Default is 365 days. Health Connect returns only the 30 days
+  /// before the app was first granted access unless the app holds
+  /// `READ_HEALTH_DATA_HISTORY`; see the file header.
   ///
   /// On iOS this is a no-op (call [AppleHealthRuntimeSink] for the
   /// `export.zip` path instead). Returns a result with

@@ -233,8 +233,7 @@ class SynheartWearSourceHandler implements WearSourceHandler {
         ?.toDouble();
     final hrvSdnn = wearMetrics.getMetric(wear.MetricType.hrvSdnn)?.toDouble();
 
-    // Use RMSSD if available, otherwise SDNN
-    final hrv = hrvRmssd ?? hrvSdnn;
+    // RMSSD and SDNN are different statistics; never report one as the other.
 
     // Get RR intervals if available
     final rrIntervals = wearMetrics.rrIntervalsMs;
@@ -247,7 +246,8 @@ class SynheartWearSourceHandler implements WearSourceHandler {
     final sample = WearSample(
       timestamp: wearMetrics.timestamp, // Use timestamp from metrics
       hr: hr,
-      hrvRmssd: hrv,
+      hrvRmssd: hrvRmssd,
+      hrvSdnn: hrvSdnn,
       respRate: null, // Not provided by synheart_wear yet
       motionLevel: steps, // Raw steps — runtime normalizes
       sleepStage: null, // Not provided by synheart_wear yet

@@ -293,6 +293,10 @@ class SessionScreen extends StatelessWidget {
                   c.lastWearSample!.hrvRmssd?.toStringAsFixed(1) ?? '—',
                 ),
                 KeyValueRow(
+                  'latest sdnn',
+                  c.lastWearSample!.hrvSdnn?.toStringAsFixed(1) ?? '—',
+                ),
+                KeyValueRow(
                   'rr intervals',
                   '${c.lastWearSample!.rrIntervals?.length ?? 0}',
                 ),
