@@ -34,8 +34,9 @@ dependencies:
   # FFI for the Synheart Runtime native library
   ffi: ^2.1.0
 
-  # Syni client — Flutter SDK for on-device LLM inference (pub.dev).
-  syni: ^0.3.2
+  # Syni client — Flutter SDK for on-device LLM inference (pub.dev). 0.4 has
+  # no Dart API change; its break is where the iOS runtime is read from.
+  syni: '>=0.3.2 <0.5.0'
 
   # Core dependencies
   rxdart: ^0.28.0
