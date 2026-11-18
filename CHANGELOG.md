@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-18
+
+### Changed
+- **`syni` range widened to `>=0.3.2 <0.5.0`.** An app could not use syni
+  0.4.x next to this package, since `^0.3.2` stops below 0.4.0. syni 0.4.0
+  changed no Dart API; its breaking change is that the iOS podspec reads the
+  runtime only from `synheart/vendor/syni-runtime/ios/`. 0.4.1 adds an
+  on-disk prompt-prefix cache and per-phase inference stats.
+
 ## [0.24.0] - 2026-11-12
 
 ### Added
