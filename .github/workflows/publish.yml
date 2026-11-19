@@ -28,16 +28,6 @@ jobs:
                   flutter-version: '3.38.7'
                   channel: 'stable'
 
-            - name: Configure git auth for source dependencies
-              env:
-                  GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
-              run: |
-                  if [ -z "${GH_TOKEN}" ]; then
-                    echo "::warning::ORG_READ_TOKEN secret is not set; some source dependencies may fail to fetch."
-                  else
-                    git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-                  fi
-
             - name: Install dependencies
               run: flutter pub get
 
