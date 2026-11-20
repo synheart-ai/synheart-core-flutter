@@ -1,0 +1,25 @@
+version: 2
+
+multi-ecosystem-groups:
+  dependency-updates:
+    schedule:
+      interval: weekly
+      day: saturday
+      time: "10:00"
+      timezone: Africa/Addis_Ababa
+
+updates:
+  - package-ecosystem: pub
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: dependency-updates
+
+  - package-ecosystem: gradle
+    directory: "/android"
+    patterns: ["*"]
+    multi-ecosystem-group: dependency-updates
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: dependency-updates
