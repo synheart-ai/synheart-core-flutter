@@ -36,7 +36,7 @@ dependencies:
 
   # Syni client — Flutter SDK for on-device LLM inference (pub.dev). 0.4 has
   # no Dart API change; its break is where the iOS runtime is read from.
-  syni: '>=0.3.2 <0.5.0'
+  syni: ">=0.3.2 <0.5.0"
 
   # Core dependencies
   rxdart: ^0.28.0
@@ -58,11 +58,11 @@ dependencies:
   path_provider: ^2.1.5
 
   # Secure storage for consent and sensitive data
-  flutter_secure_storage: ^9.0.0
+  flutter_secure_storage: ">=9.0.0 <12.0.0"
 
   # Optional: for cloud sync
   http: ^1.1.0
-  connectivity_plus: ^6.0.5
+  connectivity_plus: ">=6.0.5 <8.0.0"
 
   # State management for example app
   provider: ^6.1.1
@@ -77,7 +77,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   sqflite_common_ffi: ^2.3.3
-  flutter_lints: ^3.0.0
+  flutter_lints: ">=3.0.0 <7.0.0"
 
 flutter:
   uses-material-design: true

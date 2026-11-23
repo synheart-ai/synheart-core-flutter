@@ -2,7 +2,7 @@ group 'ai.synheart.core_runtime'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.9.0'
+    ext.kotlin_version = '2.4.21'
     repositories {
         google()
         mavenCentral()
