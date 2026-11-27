@@ -30,6 +30,17 @@ typedef SynheartGetAttestationNative =
 typedef SynheartKeyExistsNative = Int32 Function(Pointer<Utf8> deviceId);
 typedef SynheartDeleteKeyNative = Int32 Function(Pointer<Utf8> deviceId);
 
+/// P-256 ECDH for sync-space sharing (C ABI 4.3): agree between the key under
+/// `alias` and `peer` (an uncompressed point, 65 bytes), write the 32-byte
+/// shared secret to `out`, return 0. Anything else is a failure.
+typedef SynheartKeyAgreementNative =
+    Int32 Function(
+      Pointer<Utf8> alias,
+      Pointer<Uint8> peer,
+      Size peerLen,
+      Pointer<Uint8> out,
+    );
+
 // ── Platform secure-storage callback typedefs (native) ───────────────────
 //
 // Match `SynheartSdkSecureStoreFn` / `…LoadFn` / `…DeleteFn` in the native
@@ -105,6 +116,14 @@ class SynheartSdkFfi {
     Pointer<NativeFunction<SynheartSecureDeleteNative>> deleteFn,
   )?
   setStorageCallbacks;
+
+  /// `synheart_core_sdk_set_key_agreement_callback` (C ABI 4.3). Null on an
+  /// older runtime, which has no space sharing.
+  int Function(
+    Pointer<Void> handle,
+    Pointer<NativeFunction<SynheartKeyAgreementNative>> agree,
+  )?
+  setKeyAgreementCallback;
 
   bool get _hasCryptoSetter =>
       setCryptoCallbacks != null || setCryptoCallbacksAlt != null;
@@ -198,6 +217,20 @@ class SynheartSdkFfi {
               Pointer<NativeFunction<SynheartSecureDeleteNative>>,
             )
           >('synheart_core_set_storage_callbacks');
+    } catch (_) {}
+
+    try {
+      o.setKeyAgreementCallback = lib
+          .lookupFunction<
+            Int32 Function(
+              Pointer<Void>,
+              Pointer<NativeFunction<SynheartKeyAgreementNative>>,
+            ),
+            int Function(
+              Pointer<Void>,
+              Pointer<NativeFunction<SynheartKeyAgreementNative>>,
+            )
+          >('synheart_core_sdk_set_key_agreement_callback');
     } catch (_) {}
 
     return o;
