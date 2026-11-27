@@ -15,6 +15,8 @@ import 'sdk_ffi.dart';
 /// - `synheart_native_get_attestation`
 /// - `synheart_native_key_exists`
 /// - `synheart_native_delete_key`
+/// - `synheart_native_key_agreement` (optional, space sharing; see
+///   [tryKeyAgreementFn])
 ///
 /// Android: symbols live in `libsynheart_native_crypto.so` (loaded by
 /// `SynheartAuthPlugin` via `System.loadLibrary`). iOS: `@_cdecl` symbols
@@ -46,6 +48,21 @@ abstract final class PlatformNativeSdkCryptoCallbacks {
             'synheart_native_delete_key',
           );
       return table;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// `synheart_native_key_agreement` (synheart_auth 0.1.14 / SynheartAuth
+  /// 0.1.5 and later), or null when the host's auth plugin predates it. Space
+  /// sharing needs it; everything else works without it.
+  static Pointer<NativeFunction<SynheartKeyAgreementNative>>?
+  tryKeyAgreementFn() {
+    try {
+      return _openNativeLib()
+          .lookup<NativeFunction<SynheartKeyAgreementNative>>(
+            'synheart_native_key_agreement',
+          );
     } catch (_) {
       return null;
     }

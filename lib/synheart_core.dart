@@ -40,6 +40,7 @@ export 'src/config/synheart_mode.dart';
 export 'src/config/synheart_errors.dart';
 
 // Cross-device synchronization readiness.
+export 'src/sync/space_timeline.dart';
 export 'src/sync/sync_readiness.dart';
 export 'src/sync/sync_status.dart';
 

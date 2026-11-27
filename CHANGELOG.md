@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-27
+
+### Added — HSI sharing across a sync space (core-runtime 0.47.0)
+- **`Synheart.spaceTimeline(from:, to:, origins:, members:, maxPoints:)`**
+  returns a typed `SpaceTimeline`: one series per device in the sync space,
+  bucketed by minute, half hour or day (the finest that fits `maxPoints`).
+  It reads only the local database, so it is cheap on every chart redraw. A
+  bucket with no windows is absent, not zero.
+- **`Synheart.setSpaceSharing(bool)`** turns sharing with the other devices
+  on or off. The runtime doesn't remember it: call it at every launch once
+  sync is set up. It throws `SyncNativeException` with the first unmet
+  condition (`CONFIGURATION_MISSING`, `DEVICE_REGISTRATION_REQUIRED`, …).
+- **`Synheart.spaceSyncNow()`** runs the exchange now instead of at its next
+  minute, for foreground and sync pushes.
+- **`Synheart.spaceSharingSupported`** says whether this build can share:
+  runtime 0.47.0 or later, and the host's key-agreement function registered.
+- The SDK registers `synheart_native_key_agreement` (synheart_auth 0.1.14 and
+  later) with `synheart_core_sdk_set_key_agreement_callback` right after the
+  crypto callbacks, every time they are set. Without it, or on an older
+  runtime, only sharing is unavailable.
+
+### Changed
+- Written against core-runtime **0.47.0** (C ABI 4.3). Runtime 0.45.0 and
+  later still load; the new calls are optional and report themselves
+  unavailable on an older runtime.
+
 ## [0.24.1] - 2026-11-18
 
 ### Changed

@@ -67,6 +67,7 @@ enum _SyncFfiOperation {
   revokeDevice,
   deleteSpace,
   clearLocalSpace,
+  spaceSetSharing,
 }
 
 const _syncFfiWorkerFailureKey = '_synheart_sync_ffi_worker_failure';
@@ -166,6 +167,9 @@ Map<String, dynamic>? _executeSyncFfiOperation({
       ),
       _SyncFfiOperation.deleteSpace => ffi.syncDeleteSpace(handle),
       _SyncFfiOperation.clearLocalSpace => ffi.syncClearLocalSpace(handle),
+      _SyncFfiOperation.spaceSetSharing =>
+        ffi.spaceSetSharing?.call(handle, firstArg == '1' ? 1 : 0) ??
+            nullptr.cast<Utf8>(),
     };
     if (output == nullptr) {
       SynheartLogger.log(
@@ -809,6 +813,23 @@ class CoreRuntimeBridge {
     }
     _sdkCryptoTable = table;
     return 0;
+  }
+
+  /// Register the host's P-256 key-agreement function for space sharing
+  /// (`synheart_core_sdk_set_key_agreement_callback`, C ABI 4.3). Must follow
+  /// [setSdkCryptoCallbacks], and be repeated each time those are set.
+  ///
+  /// Returns `0` on success, `-2` when the runtime predates the call, `-1`
+  /// when the bridge is disposed, else the runtime's code.
+  int setKeyAgreementCallback(
+    Pointer<NativeFunction<SynheartKeyAgreementNative>> agree,
+  ) {
+    if (_disposed) return -1;
+    final setter = _ffi.sdkFfi.setKeyAgreementCallback;
+    if (setter == null) return -2;
+    final rc = setter(_handle, agree);
+    if (rc != 0) _noteFailure();
+    return rc;
   }
 
   /// Attach host-provided secure-storage callbacks so the native core can
@@ -2465,6 +2486,49 @@ class CoreRuntimeBridge {
       _SyncFfiOperation.pairingStatus,
       firstArg: token,
     );
+  }
+
+  /// Whether the loaded runtime has space sharing and the space timeline
+  /// (core-runtime 0.47.0, C ABI 4.3).
+  bool get spaceSharingAvailable =>
+      _ffi.spaceTimeline != null &&
+      _ffi.spaceSetSharing != null &&
+      _ffi.spaceSyncNow != null;
+
+  /// Per-device HSI buckets for charts (`synheart_core_space_timeline`).
+  /// [queryJson] is `{from_ms, to_ms, origins?, members?, max_points?}`.
+  /// Local only, cheap enough for every redraw. Returns the envelope's `data`
+  /// (`{tier, bucket_ms, point, series}`), null when the runtime predates the
+  /// call; throws [SyncNativeException] on a runtime failure.
+  Map<String, dynamic>? spaceTimeline(String queryJson) {
+    final fn = _ffi.spaceTimeline;
+    if (fn == null || _disposed) return null;
+    return _callSyncEnvelope(
+      () => _withCString(queryJson, (q) => fn(_handle, q)),
+    );
+  }
+
+  /// Turns HSI sharing with the other devices in the sync space on or off
+  /// (`synheart_core_space_set_sharing`). Not remembered across launches.
+  /// Runs on the sync worker. Returns `{sharing: bool}`, null when the runtime
+  /// predates the call; throws [SyncNativeException] with the first unmet
+  /// condition (`CONFIGURATION_MISSING`, `DEVICE_REGISTRATION_REQUIRED`, …).
+  Future<Map<String, dynamic>?> spaceSetSharing(bool enabled) {
+    if (_ffi.spaceSetSharing == null) return Future.value(null);
+    return _runBackgroundSyncEnvelope(
+      _SyncFfiOperation.spaceSetSharing,
+      firstArg: enabled ? '1' : '0',
+    );
+  }
+
+  /// Runs sharing now rather than at its next minute
+  /// (`synheart_core_space_sync_now`); returns at once. Null when the runtime
+  /// predates the call; throws [SyncNativeException] (`CONFIGURATION_MISSING`
+  /// while sharing is off).
+  Map<String, dynamic>? spaceSyncNow() {
+    final fn = _ffi.spaceSyncNow;
+    if (fn == null || _disposed) return null;
+    return _callSyncEnvelope(() => fn(_handle));
   }
 
   /// Local sync-engine state, no network: `{enabled, sync_space_id,

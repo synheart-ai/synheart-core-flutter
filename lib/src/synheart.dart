@@ -56,6 +56,7 @@ import 'core_runtime/runtime_compat.dart';
 import 'core_runtime/runtime_exception.dart';
 import 'core_runtime/ffi_bindings.dart' show SynheartCoreFFI;
 import 'core_runtime/platform_native_sdk_crypto_callbacks.dart';
+import 'sync/space_timeline.dart';
 import 'sync/sync_readiness.dart';
 import 'sync/sync_status.dart';
 
@@ -208,6 +209,10 @@ class Synheart {
   /// True when [sdkRegisterDevice] succeeded for this process (core-runtime auth path).
   static bool _deviceAuthViaCoreRuntime = false;
   static bool _sdkCryptoCallbacksAttached = false;
+
+  /// Whether the host's key-agreement function is registered with the
+  /// runtime, which space sharing needs (see [spaceSharingSupported]).
+  static bool _keyAgreementAttached = false;
 
   /// Set when registration last failed with `STORAGE_UNAVAILABLE`: the OS
   /// credential store did not answer (a Keychain / Keystore locked at boot).
@@ -808,6 +813,83 @@ class Synheart {
     return data == null ? null : SyncPairingStatus.fromMap(data);
   }
 
+  // ── Space sharing (core-runtime 0.47.0) ──────────────────────────────
+  //
+  // Devices in a sync space can share their HSI: each device seals its
+  // windows per UTC quarter hour into one end-to-end encrypted, signed chunk
+  // and fetches the others'. [spaceTimeline] then returns one series per
+  // device. Pairing, the roster, keys and the exchange all run in the runtime.
+
+  /// Whether this build can share HSI across the sync space: the runtime has
+  /// the space calls (0.47.0+) and the host's key-agreement function is
+  /// registered (synheart_auth 0.1.14+; on Android, Android 12+ for the key
+  /// itself). Sharing still needs sync set up, a registered device and an
+  /// entitled account; [setSpaceSharing] reports which is missing.
+  static bool get spaceSharingSupported =>
+      _keyAgreementAttached && (_coreRuntime?.spaceSharingAvailable ?? false);
+
+  /// Turns HSI sharing with the other devices in the sync space on or off.
+  ///
+  /// The runtime does not remember it: call it with `true` at every launch,
+  /// once sync is set up, while the person has sharing on. Off stops sending
+  /// and receiving; what was received stays. Turning sync off or logging out
+  /// turns sharing off; logout also removes what the other devices sent.
+  ///
+  /// Returns the runtime's sharing state, or null when the runtime predates
+  /// sharing. Throws [SyncNativeException] with the first unmet condition:
+  /// `CONFIGURATION_MISSING` (no sync or no space),
+  /// `DEVICE_REGISTRATION_REQUIRED`, a missing key-agreement callback, or an
+  /// account the sync service does not entitle. Runs off the UI isolate.
+  static Future<bool?> setSpaceSharing(bool enabled) async {
+    final runtime = _coreRuntime;
+    if (runtime == null) return null;
+    final data = await runtime.spaceSetSharing(enabled);
+    if (data == null) return null;
+    return data['sharing'] == true;
+  }
+
+  /// Runs sharing now instead of at its next minute: on foreground, after a
+  /// sync push, or on wake. Returns at once; the exchange runs in the
+  /// background. No-op (returns false) when the runtime predates sharing.
+  /// Throws [SyncNativeException] (`CONFIGURATION_MISSING` while sharing is
+  /// off).
+  static bool spaceSyncNow() {
+    final runtime = _coreRuntime;
+    if (runtime == null || !runtime.spaceSharingAvailable) return false;
+    runtime.spaceSyncNow();
+    return true;
+  }
+
+  /// HSI over [from]–[to], one series per device in the sync space, bucketed
+  /// for a chart (minute, half hour or day, the finest that fits
+  /// [maxPoints]). Reads only the local database, so it is cheap on every
+  /// redraw. [origins] limits it to those devices and [members] to those
+  /// members (for example `focus`, `stress`).
+  ///
+  /// Null when the runtime bridge isn't ready or the runtime predates the
+  /// timeline (0.47.0). Throws [SyncNativeException]: `INVALID_ARGUMENT`,
+  /// `STORAGE_UNAVAILABLE` (retryable with reason `credential_store_locked`
+  /// before the first unlock), or `CRYPTO`.
+  static SpaceTimeline? spaceTimeline({
+    required DateTime from,
+    required DateTime to,
+    List<String>? origins,
+    List<String>? members,
+    int? maxPoints,
+  }) {
+    final runtime = _coreRuntime;
+    if (runtime == null) return null;
+    final query = <String, Object>{
+      'from_ms': from.millisecondsSinceEpoch,
+      'to_ms': to.millisecondsSinceEpoch,
+      if (origins != null) 'origins': origins,
+      if (members != null) 'members': members,
+      if (maxPoints != null) 'max_points': maxPoints,
+    };
+    final data = runtime.spaceTimeline(jsonEncode(query));
+    return data == null ? null : SpaceTimeline.fromMap(data);
+  }
+
   /// Unified native sync-readiness snapshot: prerequisite booleans plus a
   /// primary `state` (e.g. `CONFIGURATION_MISSING`,
   /// `DEVICE_REGISTRATION_REQUIRED`, `NO_ACTIVE_SPACE`, `SRK_UNAVAILABLE`,
@@ -1197,6 +1279,30 @@ class Synheart {
     }
     // Success path is intentionally silent — bootstrap chatter.
     _sdkCryptoCallbacksAttached = true;
+    // Space sharing's key agreement must follow the crypto callbacks, every
+    // time they are set. Optional: a runtime before 0.47.0 or an auth plugin
+    // without the symbol only loses sharing.
+    _keyAgreementAttached = _installKeyAgreementCallback(runtime);
+    return true;
+  }
+
+  static bool _installKeyAgreementCallback(CoreRuntimeBridge runtime) {
+    final agree = PlatformNativeSdkCryptoCallbacks.tryKeyAgreementFn();
+    if (agree == null) {
+      SynheartLogger.log(
+        '[Synheart] synheart_native_key_agreement not found — space sharing '
+        'is unavailable. It needs synheart_auth 0.1.14 or later.',
+      );
+      return false;
+    }
+    final rc = runtime.setKeyAgreementCallback(agree);
+    if (rc == -2) return false; // runtime before 0.47.0: no space sharing.
+    if (rc != 0) {
+      SynheartLogger.log(
+        '[Synheart] synheart_core_sdk_set_key_agreement_callback failed: $rc',
+      );
+      return false;
+    }
     return true;
   }
 
@@ -6656,6 +6762,7 @@ class Synheart {
       _invalidateHsiCache();
       _deviceAuthViaCoreRuntime = false;
       _sdkCryptoCallbacksAttached = false;
+      _keyAgreementAttached = false;
 
       SynheartLogger.log('[Synheart] Disposed');
       // Allow re-initialization by creating a fresh instance next time.

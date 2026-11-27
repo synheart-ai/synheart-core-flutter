@@ -531,6 +531,10 @@ typedef _SyncJoinSpaceDart =
 typedef _SyncGeneratePairingC = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncGeneratePairingDart = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncStatusC = Pointer<Utf8> Function(Pointer<Void> h);
+typedef _SpaceSetSharingC =
+    Pointer<Utf8> Function(Pointer<Void> h, Int32 enabled);
+typedef _SpaceSetSharingDart =
+    Pointer<Utf8> Function(Pointer<Void> h, int enabled);
 typedef _SyncStatusDart = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncRecoverSpaceC =
     Pointer<Utf8> Function(
@@ -1680,6 +1684,35 @@ class SynheartCoreFFI {
       'synheart_core_sync_pairing_status',
     ),
   );
+
+  /// `synheart_core_space_timeline(handle, query_json)`: per-device HSI
+  /// buckets for charts, as a sync envelope (C ABI 4.3, runtime 0.47.0).
+  /// Local only, no network. Optional: null on an older runtime.
+  late final spaceTimeline = _optional(
+    'synheart_core_space_timeline',
+    () => _lib.lookupFunction<_SyncPairingStatusC, _SyncPairingStatusDart>(
+      'synheart_core_space_timeline',
+    ),
+  );
+
+  /// `synheart_core_space_set_sharing(handle, enabled)`: turns HSI sharing
+  /// with the other devices in the sync space on or off (C ABI 4.3).
+  late final spaceSetSharing = _optional(
+    'synheart_core_space_set_sharing',
+    () => _lib.lookupFunction<_SpaceSetSharingC, _SpaceSetSharingDart>(
+      'synheart_core_space_set_sharing',
+    ),
+  );
+
+  /// `synheart_core_space_sync_now(handle)`: runs sharing now instead of at
+  /// its next minute; returns at once (C ABI 4.3).
+  late final spaceSyncNow = _optional(
+    'synheart_core_space_sync_now',
+    () => _lib.lookupFunction<_SyncStatusC, _SyncStatusDart>(
+      'synheart_core_space_sync_now',
+    ),
+  );
+
   late final syncDeleteSpace = _lib
       .lookupFunction<_SyncDeleteSpaceC, _SyncDeleteSpaceDart>(
         'synheart_core_sync_delete_space',
