@@ -531,8 +531,10 @@ typedef _SyncJoinSpaceDart =
 typedef _SyncGeneratePairingC = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncGeneratePairingDart = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncStatusC = Pointer<Utf8> Function(Pointer<Void> h);
-typedef _SpaceSetSharingC = Pointer<Utf8> Function(Pointer<Void> h, Int32 enabled);
-typedef _SpaceSetSharingDart = Pointer<Utf8> Function(Pointer<Void> h, int enabled);
+typedef _SpaceSetSharingC =
+    Pointer<Utf8> Function(Pointer<Void> h, Int32 enabled);
+typedef _SpaceSetSharingDart =
+    Pointer<Utf8> Function(Pointer<Void> h, int enabled);
 typedef _SyncStatusDart = Pointer<Utf8> Function(Pointer<Void> h);
 typedef _SyncRecoverSpaceC =
     Pointer<Utf8> Function(
@@ -1682,6 +1684,7 @@ class SynheartCoreFFI {
       'synheart_core_sync_pairing_status',
     ),
   );
+
   /// `synheart_core_space_timeline(handle, query_json)`: per-device HSI
   /// buckets for charts, as a sync envelope (C ABI 4.3, runtime 0.47.0).
   /// Local only, no network. Optional: null on an older runtime.

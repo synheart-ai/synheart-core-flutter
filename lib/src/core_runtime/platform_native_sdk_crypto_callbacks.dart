@@ -59,9 +59,10 @@ abstract final class PlatformNativeSdkCryptoCallbacks {
   static Pointer<NativeFunction<SynheartKeyAgreementNative>>?
   tryKeyAgreementFn() {
     try {
-      return _openNativeLib().lookup<NativeFunction<SynheartKeyAgreementNative>>(
-        'synheart_native_key_agreement',
-      );
+      return _openNativeLib()
+          .lookup<NativeFunction<SynheartKeyAgreementNative>>(
+            'synheart_native_key_agreement',
+          );
     } catch (_) {
       return null;
     }

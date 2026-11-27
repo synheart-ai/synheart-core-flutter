@@ -826,8 +826,7 @@ class Synheart {
   /// itself). Sharing still needs sync set up, a registered device and an
   /// entitled account; [setSpaceSharing] reports which is missing.
   static bool get spaceSharingSupported =>
-      _keyAgreementAttached &&
-      (_coreRuntime?.spaceSharingAvailable ?? false);
+      _keyAgreementAttached && (_coreRuntime?.spaceSharingAvailable ?? false);
 
   /// Turns HSI sharing with the other devices in the sync space on or off.
   ///

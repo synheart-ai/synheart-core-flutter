@@ -2503,7 +2503,9 @@ class CoreRuntimeBridge {
   Map<String, dynamic>? spaceTimeline(String queryJson) {
     final fn = _ffi.spaceTimeline;
     if (fn == null || _disposed) return null;
-    return _callSyncEnvelope(() => _withCString(queryJson, (q) => fn(_handle, q)));
+    return _callSyncEnvelope(
+      () => _withCString(queryJson, (q) => fn(_handle, q)),
+    );
   }
 
   /// Turns HSI sharing with the other devices in the sync space on or off
