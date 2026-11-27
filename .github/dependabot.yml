@@ -13,13 +13,25 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: dependency-updates
+    ignore:
+      # Keep major upgrades separate for manual review.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: gradle
     directory: "/android"
     patterns: ["*"]
     multi-ecosystem-group: dependency-updates
+    ignore:
+      # Keep major upgrades separate for manual review.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: dependency-updates
+    ignore:
+      # Keep major upgrades separate for manual review.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
